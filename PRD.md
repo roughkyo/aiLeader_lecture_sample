@@ -21,7 +21,7 @@
 ## 3. 사용자
 | 사용자 | 설명 | 기기 |
 |---|---|---|
-| 교사 | 고등학교 정보·인공지능 교과 교사. Claude Code로 자료를 만들고 검토·배포 | PC |
+| 교사 | 고등학교 정보·인공지능 교과 교사. Claude Code로 자료를 만들고 검토 | PC |
 | 학생 | 고등학교 2학년. 기초·보통·심화 중 하나를 고름 | 학교 PC·태블릿·휴대폰 |
 | 다문화 학생 | 한국어가 서툰 고등학생. 모국어: 베트남어·중국어 | 위와 같음 |
 
@@ -132,7 +132,7 @@
 | 차시 | 이 앱에 더하는 것 |
 |---|---|
 | 4차시 | 이 PRD 전체 (Claude Code로 만든 수준별 자료, 집중 모드, 활동·형성평가, Gemini 소크라테스 힌트) |
-| 5차시 | Supabase: 학생 제출 결과 저장(`answers`: 확인 질문 답 / `questions`: 힌트 질문·`hint_step`), 서버 함수 `api/submit.js`·`api/results.js`, 교사 화면 `teacher.html`(`TEACHER_CODE`), RLS로 브라우저 직접 접근 차단 |
+| 5차시 | Vercel로 앱 배포, Supabase: 학생 제출 결과 저장(`answers`: 확인 질문 답 / `questions`: 힌트 질문·`hint_step`), 서버 함수 `api/submit.js`·`api/results.js`, 교사 화면 `teacher.html`(`TEACHER_CODE`), RLS로 브라우저 직접 접근 차단 |
 | 6차시 | 쌓인 데이터로 「우리 반 질문 보드」(수준별 질문 분포, 정답률, 힌트 사용 현황) + 동료 사용 관찰·디버깅 |
 
 ## 10. v1에서 바뀐 점과 남은 질문

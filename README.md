@@ -50,13 +50,11 @@ Node.js 20 이상이 필요합니다(외부 npm 패키지 설치 불필요).
    ```
 3. 브라우저에서 `http://127.0.0.1:5173` 으로 접속합니다.
 
-## 배포 및 연계 (GitHub → Supabase)
+## 배포
 
-- 이 저장소는 GitHub에서 **Supabase**와 직접 연계·배포하도록 구성되어 있습니다.
-- 배포 환경변수(Secrets)에 아래 항목을 등록해 사용합니다.
-  - `GEMINI_API_KEY` (필수)
-  - `GEMINI_MODEL` (선택, 기본값 `gemini-3.5-flash-lite`, 예: `gemini-3.8-flash`)
-  - `GEMINI_THINKING_LEVEL` (선택, 기본값 `low`)
+- **4차시는 내 컴퓨터(로컬)에서 `npm run dev`로 실행·테스트하는 데까지**입니다. 배포는 하지 않습니다.
+- 배포는 5차시에서 합니다. 화면·서버 함수는 **Vercel**에, 학생 기록 저장(DB)은 **Supabase**에 둡니다 → `../5차시_Supabase연동`
+- 5차시에 배포할 때 환경변수(`GEMINI_API_KEY` 등)는 Vercel 환경변수에 등록합니다. `.env.local`은 GitHub에 올리지 않습니다.
 
 ## 보안 및 개인정보 원칙
 

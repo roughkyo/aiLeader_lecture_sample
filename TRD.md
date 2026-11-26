@@ -16,7 +16,7 @@
 | 추론 강도 | 환경변수 `GEMINI_THINKING_LEVEL`, 기본값 **`low`** | 두 모델 공통으로 쓸 수 있는 값 |
 | 로컬 실행 | `dev-server.mjs` (`npm run dev`, 외부 패키지 없음) | 정적 파일 + `/api/feedback`을 한 번에 실행 |
 | 기기 저장 | **쓰지 않음** (`localStorage`·쿠키 없음) | 집중 기록·답·힌트는 메모리에만 두고 화면에만 표시 |
-| 배포 | GitHub 저장소 → Supabase 연계 | 폴더 1개 = 저장소 1개 = 배포 주소 1개. 서버 함수 형식 변환은 11-2 참고 |
+| 배포 | 4차시는 **로컬 실행(`npm run dev`)까지**. 배포는 5차시에 GitHub → Vercel로 함 | 4차시는 로컬 테스트로 끝내고, 배포와 DB 연결은 5차시에서 다룸 |
 
 외부 의존성
 - 브라우저(CDN, 정확한 버전 고정): `marked@12.0.2`, `dompurify@3.1.6`
@@ -291,7 +291,7 @@ Api-Revision: 2026-05-20
 ## 9. 보안·비용 통제
 | 항목 | 방법 |
 |---|---|
-| 키 보관 | 로컬은 `.env.local`(`.env.example`을 복사해 작성), 배포는 Supabase 환경변수(Secrets). 코드·대화창·저장소에 키를 쓰지 않음 |
+| 키 보관 | 로컬은 `.env.local`(`.env.example`을 복사해 작성), 배포(5차시)는 Vercel 환경변수. 코드·대화창·저장소에 키를 쓰지 않음 |
 | 저장소 보호 | `.gitignore`에 `.env`, `.env.*` 제외(`.env.example`만 허용). 첫 커밋 전에 확인 |
 | 소스·비밀 파일 열람 차단 | `dev-server.mjs`가 `/.`로 시작하거나 `/.`가 들어 있는 경로, `/api/` 아래 파일을 403으로 막음. 폴더 밖 경로도 403 |
 | 키 노출 점검 | 개발자 도구 Sources·Network에서 키 앞부분 검색, GitHub 저장소 검색 → 0건 |
@@ -309,18 +309,19 @@ Api-Revision: 2026-05-20
 - `.env`와 `.env.local`을 모두 읽고, 같은 이름은 `.env.local` 값이 우선함
 - `index.html`을 파일로 직접 열면(`file://`) 자료를 읽지 못함 → 반드시 로컬 서버 주소로 열기
 
-## 11. 배포 (GitHub → Supabase)
-### 11-1. 순서
-1. 커밋·푸시 전에 `.env.local`이 추적되지 않는지 확인(`git status`)
-2. GitHub 저장소에 push
-3. Supabase 환경변수(Secrets)에 `GEMINI_API_KEY` 등록(필요하면 `GEMINI_MODEL`·`GEMINI_THINKING_LEVEL`도 등록)
-4. 환경변수를 새로 등록·변경했으면 다시 배포(등록만 하면 반영 안 됨)
-5. 배포 주소에서 9절 키 노출 점검
+## 11. 로컬 테스트와 배포
+4차시는 **로컬(내 컴퓨터) 테스트까지**만 한다. 배포는 5차시에서 한다.
 
-### 11-2. 주의 — 서버 함수 형식
-- 지금 `api/feedback.js`는 Node.js `(req, res)` 형식(`res.status().json()`)이고, 로컬에서는 `dev-server.mjs`가 이 형식을 맞춰 줌
-- Supabase Edge Functions는 Deno 기반(`Deno.serve`, `Request`/`Response`)이라 그대로 올릴 수 없음. 올릴 때는 `buildPrompt()`·`callGemini()`·`leaksAnswer()`는 그대로 두고 요청·응답 처리 부분만 바꿔야 함
-- 정적 화면(`index.html`·`materials/`)을 어디에 올릴지, 함수 경로(`/api/feedback`)를 어떻게 맞출지, Secrets 이름 규칙은 **연수 당일 Supabase 공식 문서로 확인**
+### 11-1. 4차시 순서 (로컬)
+1. `.env.local`이 `.gitignore`로 제외되는지 확인(`git status`에 나오지 않아야 함)
+2. `npm run dev`로 실행해 12절 테스트를 로컬 주소(`http://127.0.0.1:5173`)에서 함
+3. 9절 키 노출 점검도 로컬 주소에서 개발자 도구로 함
+4. 커밋·푸시로 GitHub에 저장(배포가 아님)
+
+### 11-2. 5차시에서 하는 배포 (Vercel)
+- GitHub 저장소를 Vercel에 연결해 화면(`index.html`·`materials/`)과 서버 함수(`api/feedback.js`)를 배포한다. 서버 함수가 이미 Node 형식(`(req, res)`)이라 코드를 바꾸지 않고 올릴 수 있다(Vercel의 함수 형식·`api/` 폴더 규칙은 **당일 공식 문서로 확인**)
+- `.env.local`은 올라가지 않으므로 `GEMINI_API_KEY`를 Vercel 환경변수에 등록한다. 환경변수를 새로 등록·변경했으면 **재배포**해야 반영된다
+- Supabase는 DB 전용이라 화면을 올리는 용도로 쓰지 않는다. 배포 순서와 DB 연결은 5차시 폴더(`../5차시_Supabase연동`)의 TRD 11절·14절 참고
 
 ## 12. 테스트 계획
 자동 테스트 도구는 두지 않고 아래 시나리오를 직접 확인함. 2026-11-26 로컬에서 1·2·5·9번을 `gemini-3.5-flash-lite` 실제 호출로 확인함
