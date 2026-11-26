@@ -3,7 +3,6 @@
 > 요구사항: [PRD.md](PRD.md) · 근거: [설계명세서.md](설계명세서.md) · 사용법: [README.md](README.md)
 > 버전: **v2 (2026-11-26) · 상태: 구현 완료, 이 문서는 실제 소스 코드 기준** · 구현 모델: Claude Code **Sonnet 5.5** (기획·설계는 Opus)
 > v1(구현 전 설계)과 달라진 점은 13절에 정리함
-> 5차시 학생 제출 저장(테이블·RLS·서버 함수)은 14절에 설계만 추가함(**아직 구현하지 않음**)
 
 ## 1. 기술 선택 요약
 | 영역 | 선택 | 이유 |
@@ -351,140 +350,12 @@ Api-Revision: 2026-05-20
 | `localStorage`에 힌트·집중 기록 저장 | 저장하지 않음(메모리만) | 학생 기록을 남기지 않는 원칙 |
 | 누출 검사: `evidence` 문장 20자 일치 | 모범 답안 15자 창(3자 간격) 일치, 2회 누출 시 대체 힌트 | 실제 문항 데이터(`model`)에 맞춤 |
 
-## 14. 5차시 확장 설계 — 학생 제출 저장 (설계만, 아직 구현하지 않음)
-요구사항: [PRD.md](PRD.md) 5-7절 · 개인정보 원칙: [설계명세서.md](설계명세서.md) 10절
-
-### 14-1. 변경 요약
+## 14. 5차시 확장 지점
 | 지금(4차시) | 5차시에 바뀌는 것 |
 |---|---|
-| 답·점수·힌트가 화면에만 있음 | `answers`(확인 질문 답)·`questions`(학생 질문, `hint_step`) 테이블에 저장. 서버 함수 `api/submit.js` |
+| 답·점수·힌트가 화면에만 있음 | `answers`(확인 질문 답)·`questions`(힌트 질문, `hint_step`) 테이블에 저장. 서버 함수 `api/submit.js` |
 | 교사가 결과를 볼 수 없음 | `teacher.html` + `api/results.js`, 교사 코드(`TEACHER_CODE`) 확인 |
-| 학생을 구분하는 값이 없음 | 시작 화면에 **반 코드·학번** 입력(실명 입력 없음) |
-| 힌트 횟수 제한이 브라우저 기준 | 그대로 유지(DB 기준 제한은 열린 질문) |
+| 정답이 `activities.json`에 들어 있음 | 정답은 DB에 두고 RLS로 브라우저 직접 접근 차단 |
+| 힌트 횟수 제한이 브라우저 기준 | DB 기록 기준으로 제한 가능 |
 | 환경변수 `GEMINI_API_KEY` 1개 | `SUPABASE_URL`·`SUPABASE_SECRET_KEY`·`TEACHER_CODE` 추가 |
-- `api/feedback.js`의 요청 형식(5-2)은 그대로 둠. 질문 저장은 `api/feedback.js`가 아니라 **브라우저가 힌트를 받은 뒤 `api/submit.js`를 따로 호출**해서 함(힌트 기능과 저장 기능을 분리해, 저장이 실패해도 힌트는 그대로 동작)
-
-### 14-2. 데이터 모델 (Postgres)
-SQL 파일: `supabase/migrations/20261126113000_create_answers_questions.sql` (Supabase SQL Editor에 붙여넣거나 GitHub 연동으로 반영)
-
-`answers` — 확인 질문(형성평가) 답
-| 열 | 타입 | 규칙 | 설명 |
-|---|---|---|---|
-| `id` | bigint | 자동 증가, 기본 키 | 행 번호 |
-| `class_code` | text | 필수, `^[0-9A-Za-z-]{1,20}$` | 반 코드(예: `1-3`) |
-| `student_no` | text | 필수, `^[0-9]{1,10}$` | 학번(숫자만, 실명 대신) |
-| `level` | text | 필수, `basic`·`normal`·`advanced`·`multicultural` | 고른 수준(4-1절 키와 같음) |
-| `question_no` | smallint | 필수, 1~5 | 형성평가 문항 번호 |
-| `answer` | text | 필수, 1~1,000자 | 학생 답(고르기는 고른 보기 글, 골라 넣기·빈칸은 입력값, 서술형은 쓴 글) |
-| `created_at` | timestamptz | 필수, 기본값 `now()` | 제출 시각(자동) |
-
-`questions` — 학생이 AI에게 한 질문
-| 열 | 타입 | 규칙 | 설명 |
-|---|---|---|---|
-| `id` | bigint | 자동 증가, 기본 키 | 행 번호 |
-| `class_code` | text | 필수, 위와 같음 | 반 코드 |
-| `student_no` | text | 필수, 위와 같음 | 학번 |
-| `level` | text | 필수, 위와 같음 | 읽던 수준 |
-| `question_text` | text | 필수, 1~300자 | 학생 질문(힌트 요청의 `studentQuestion`과 같은 한도) |
-| `hint_step` | smallint | 필수, 1~3 | 그 질문으로 받은 힌트 단계 |
-| `created_at` | timestamptz | 필수, 기본값 `now()` | 질문 시각(자동) |
-
-- 이름·연락처·이메일·학교명을 담는 열은 **두지 않음**
-- 같은 학생이 다시 채점하면 `answers`에 줄이 더 쌓임(덮어쓰지 않고 이력을 남김)
-- 조회용 인덱스: 두 테이블 모두 `(class_code, student_no, created_at)`
-- 제약(`check`)은 서버 함수 검사와 같은 규칙을 DB에도 한 번 더 둠 → 서버 함수가 잘못 만들어져도 형식에 맞지 않는 값은 저장되지 않음
-
-### 14-3. 접근 권한 (RLS)
-- 두 테이블 모두 `enable row level security`
-- **`create policy`를 쓰지 않음** → 브라우저용 키(publishable key, `anon`·`authenticated` 역할)로는 읽기·쓰기가 모두 거부됨
-- `anon`·`authenticated` 역할의 테이블 권한도 회수(`revoke all`)해 이중으로 막음
-- 서버 함수는 secret key(`service_role`)로 접근함. 이 역할은 RLS를 우회하므로 정책이 없어도 서버 함수는 저장·조회가 됨
-- secret key는 서버 함수 환경변수에만 두고 브라우저 코드·저장소·응답에 노출하지 않음
-
-### 14-4. 서버 함수 `POST /api/submit`
-공통: `Content-Type: application/json`, 응답 `Cache-Control: no-store`. 키 `SUPABASE_URL`·`SUPABASE_SECRET_KEY`가 없으면 500 `NO_STORE`. 서버는 답·질문을 로그에 남기지 않음
-
-확인 질문 답 저장
-```json
-{
-  "kind": "answers",
-  "classCode": "1-3",
-  "studentNo": "7",
-  "level": "normal",
-  "items": [
-    { "questionNo": 1, "answer": "…" },
-    { "questionNo": 5, "answer": "…" }
-  ]
-}
-```
-학생 질문 저장
-```json
-{
-  "kind": "question",
-  "classCode": "1-3",
-  "studentNo": "7",
-  "level": "normal",
-  "questionText": "토큰이 뭔가요?",
-  "hintStep": 1
-}
-```
-| 항목 | 검사 규칙 |
-|---|---|
-| `kind` | `answers` 또는 `question` |
-| `classCode` | 14-2 형식. 아니면 400 `BAD_REQUEST` |
-| `studentNo` | 14-2 형식 |
-| `level` | 4개 중 하나 |
-| `items` | 1~5개, `questionNo` 1~5(중복 금지), `answer` 1~1,000자. 빈 답은 보내지 않음(브라우저에서 제외) |
-| `questionText` | 1~300자 |
-| `hintStep` | 1~3 |
-| 요청 본문 | 20KB 이하, 넘으면 413 |
-
-응답 `201`: `{ "saved": 2 }` (저장한 줄 수)
-| HTTP | `error` | 발생 조건 | 화면 안내 |
-|---|---|---|---|
-| 400 | `BAD_REQUEST` | 검사 실패 | 반 코드와 학번을 확인해 주세요 |
-| 405 | `METHOD_NOT_ALLOWED` | POST가 아님 | — |
-| 413 | `TOO_LARGE` | 본문 20KB 초과 | — |
-| 500 | `NO_STORE` | Supabase 환경변수 없음 | 저장 서버 설정을 확인해 주세요 |
-| 502 | `STORE_ERROR` | Supabase 저장 실패 | 저장하지 못했어요. [다시 저장]을 눌러 주세요 |
-- 저장이 실패해도 채점 결과·힌트는 화면에 그대로 보여 줌(PRD F-D7)
-
-### 14-5. 서버 함수 `GET /api/results` (교사 조회)
-- 요청: `GET /api/results?classCode=1-3` + 헤더 `x-teacher-code: {교사 코드}`
-- 서버가 `TEACHER_CODE` 환경변수와 비교(길이가 같을 때 상수 시간 비교). 없거나 틀리면 401 `UNAUTHORIZED`. 코드는 주소(쿼리 문자열)에 넣지 않음
-- 응답 `200`: `{ "answers": [ … ], "questions": [ … ] }` (해당 반의 행을 `created_at` 내림차순, 각 최대 500줄)
-- 반 코드 형식 검사는 14-4와 같음. 학생 화면(`index.html`)에서는 이 함수를 부르지 않음
-
-### 14-6. 화면 변경
-| 화면 | 변경 |
-|---|---|
-| `index.html` 시작 화면 | 반 코드·학번 입력 칸 추가. 안내 문구: "이름·연락처는 쓰지 않아요". 입력 전에는 저장 없이 읽기만 가능 |
-| `js/activities.js` | 채점 후 `api/submit.js`(`kind: "answers"`) 호출, 힌트 성공 후 질문이 있으면 `kind: "question"` 호출 |
-| `teacher.html`(새 파일) | 교사 코드·반 코드 입력 → 답·질문 표. 실명 열 없음 |
-
-### 14-7. 환경변수
-| 이름 | 용도 | 비고 |
-|---|---|---|
-| `GEMINI_API_KEY` | 힌트(4차시) | 변경 없음 |
-| `SUPABASE_URL` | 프로젝트 주소 | 서버 함수에서만 읽음 |
-| `SUPABASE_SECRET_KEY` | 모든 권한 키 | 서버 함수에서만 읽음. 코드·대화창에 붙여넣지 않음 |
-| `TEACHER_CODE` | 교사 조회 코드 | 교사가 정함. 저장소에 쓰지 않음 |
-- `.env.example`에 이름만 추가하고 값은 비워 둠
-
-### 14-8. 5차시 테스트 계획
-| # | 시나리오 | 기대 결과 |
-|---|---|---|
-| 1 | 반 코드 `1-3`, 학번 `7`로 채점 | `answers`에 문항별 줄이 생기고 Table Editor에서 확인됨 |
-| 2 | 질문을 입력해 힌트 받기 | `questions`에 질문·힌트 단계가 한 줄 저장됨. 질문을 비운 요청은 줄이 생기지 않음 |
-| 3 | 학번에 이름(한글)·연락처 형태를 입력 | 400 `BAD_REQUEST`, 저장 안 됨 |
-| 4 | 개발자 도구에서 publishable key로 `answers` 조회·삽입 | 권한 오류로 거부(빈 결과 또는 오류) |
-| 5 | 휴대폰에서 제출 → PC 교사 화면에서 조회 | 같은 기록이 보임 |
-| 6 | 교사 코드 없이 `/api/results` 호출 | 401 |
-| 7 | 키 노출 점검(9절 방식) | `SUPABASE_SECRET_KEY` 값이 브라우저·저장소에 0건 |
-
-### 14-9. 열린 질문
-- **정답률 집계(6차시)**: `answers`에 정오 열이 없음. 정답률이 필요하면 `is_correct` 열을 추가하거나 서버 함수에서 `activities.json`의 정답과 비교해 계산하는 방식을 6차시 전에 정함
-- **정답 보호**: 정답이 `activities.json`에 그대로 있어 개발자 도구로 볼 수 있음. 정답을 DB로 옮겨 서버에서만 채점하는 방식은 범위가 커서 5차시 수업 사례로만 다룸
-- **학번의 식별성**: 반 코드와 학번의 조합으로 학생을 알아볼 수 있음 → 실제 수업 적용 전에 학교 개인정보 처리 절차를 확인
-- **힌트 횟수 DB 제한**: `questions` 기록으로 서버에서 3회를 세는 방식은 아직 설계하지 않음(지금은 브라우저 기준)
-- **서버 함수 형식**: `api/submit.js`·`api/results.js`도 11-2절과 같은 이유로 Supabase 배포 형식에 맞춰 옮겨야 할 수 있음(당일 공식 문서 확인)
+- `api/feedback.js`의 요청 형식(5-2)은 그대로 두고, 5차시에는 힌트 요청 뒤 `questions`에 기록하는 부분만 더함
