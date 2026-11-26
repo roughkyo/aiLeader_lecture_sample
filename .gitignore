@@ -3,9 +3,6 @@
 .env.*
 !.env.example
 
-# Vercel CLI가 만드는 연결 정보
-.vercel/
-
 # 패키지 및 로그
 node_modules/
 npm-debug.log*

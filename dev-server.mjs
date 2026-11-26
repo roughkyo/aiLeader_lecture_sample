@@ -1,6 +1,6 @@
 // 로컬 개발 서버 (외부 패키지 없음, Node.js 20+)
 // - .env.local(.env) 자동 로드
-// - 정적 파일 서빙 + Vercel 함수(api/feedback.js) 로컬 실행
+// - 정적 파일 서빙 + 서버 함수(api/feedback.js) 로컬 실행
 
 import http from 'node:http';
 import fs from 'node:fs/promises';

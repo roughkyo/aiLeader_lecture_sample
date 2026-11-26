@@ -26,9 +26,8 @@
 │  ├─ focus.js             # 집중 모드(전체 화면 · 이탈 감지 · 타이머)
 │  └─ activities.js        # 본문 활동 · 형성평가 · AI 힌트 요청 UI
 ├─ materials/              # 수준별 학습자료(기초·보통·심화·다문화.md) 및 activities.json
-├─ api/feedback.js         # Vercel Serverless Function — Gemini 소크라테스식 힌트
+├─ api/feedback.js         # 서버 함수 — Gemini 소크라테스식 힌트
 ├─ dev-server.mjs          # 로컬 개발 서버(Node.js 20+, 외부 패키지 없음)
-├─ vercel.json             # Vercel 함수 실행 시간 및 API 캐시 방지 설정
 ├─ package.json
 └─ .env.example            # 환경변수 템플릿
 ```
@@ -51,14 +50,13 @@ Node.js 20 이상이 필요합니다(외부 npm 패키지 설치 불필요).
    ```
 3. 브라우저에서 `http://127.0.0.1:5173` 으로 접속합니다.
 
-## Vercel 배포 방법
+## 배포 및 연계 (GitHub → Supabase)
 
-1. 이 GitHub 저장소를 Vercel 프로젝트로 연결(Import)합니다.
-2. Vercel 프로젝트 **Settings → Environment Variables**에 아래 변수를 등록합니다.
-   - `GEMINI_API_KEY` (필수)
-   - `GEMINI_MODEL` (선택, 기본값 `gemini-3.5-flash-lite`, 예: `gemini-3.8-flash`)
-   - `GEMINI_THINKING_LEVEL` (선택, 기본값 `low`)
-3. 배포 후 브라우저 개발자도구(Network/Sources)에서 API 키가 노출되지 않는지 확인합니다.
+- 이 저장소는 GitHub에서 **Supabase**와 직접 연계·배포하도록 구성되어 있습니다(별도 Vercel 설정 파일 없음).
+- 배포 환경변수(Secrets)에 아래 항목을 등록해 사용합니다.
+  - `GEMINI_API_KEY` (필수)
+  - `GEMINI_MODEL` (선택, 기본값 `gemini-3.5-flash-lite`, 예: `gemini-3.8-flash`)
+  - `GEMINI_THINKING_LEVEL` (선택, 기본값 `low`)
 
 ## 보안 및 개인정보 원칙
 

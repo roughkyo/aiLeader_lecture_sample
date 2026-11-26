@@ -1,6 +1,6 @@
 // 학습 활동: 본문 중간 활동(하나 고르기·골라 넣기·빈칸 채우기·중요 단어 찾기) + 형성평가
 // 문제·정답은 materials/activities.json에 있다. 답과 점수는 화면에만 보이고 저장하지 않는다.
-// 서술형의 [💡 힌트 받기]는 서버 함수 /api/feedback(Gemini)을 부른다 → vercel dev 또는 배포 환경에서만 동작.
+// 서술형의 [💡 힌트 받기]는 서버 함수 /api/feedback(Gemini)을 부른다 → 로컬 개발 서버(npm run dev) 또는 배포 환경에서 동작.
 
 const TYPE_LABEL = {
   choice: '하나 고르기',
@@ -57,8 +57,8 @@ const clearMarks = (nodes) => nodes.forEach((n) => n.classList.remove(...MARKS))
 
 /* ---------- 힌트 요청 (서버 함수) ---------- */
 const HINT_ERRORS = {
-  NO_SERVER: '힌트 서버가 켜져 있지 않아요. 로컬 개발 서버(npm run dev 또는 vercel dev)로 실행했는지 확인해 주세요.',
-  NO_KEY: '서버에 GEMINI_API_KEY가 없어요. .env.local(배포 시 Vercel 환경변수)을 확인해 주세요.',
+  NO_SERVER: '힌트 서버가 켜져 있지 않아요. 로컬 개발 서버(npm run dev)로 실행했는지 확인해 주세요.',
+  NO_KEY: '서버에 GEMINI_API_KEY가 없어요. .env.local 또는 배포 환경변수를 확인해 주세요.',
   BAD_KEY: 'API 키가 올바르지 않아요. AI Studio에서 키를 다시 확인해 주세요.',
   RATE_LIMIT: '요청이 많아요. 30초쯤 뒤에 다시 눌러 주세요.',
   TIMEOUT: '힌트를 만드는 데 시간이 오래 걸려요. 다시 눌러 주세요.',
