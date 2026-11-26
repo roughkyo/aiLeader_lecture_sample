@@ -52,7 +52,7 @@ Node.js 20 이상이 필요합니다(외부 npm 패키지 설치 불필요).
 
 ## 배포 및 연계 (GitHub → Supabase)
 
-- 이 저장소는 GitHub에서 **Supabase**와 직접 연계·배포하도록 구성되어 있습니다(별도 Vercel 설정 파일 없음).
+- 이 저장소는 GitHub에서 **Supabase**와 직접 연계·배포하도록 구성되어 있습니다.
 - 배포 환경변수(Secrets)에 아래 항목을 등록해 사용합니다.
   - `GEMINI_API_KEY` (필수)
   - `GEMINI_MODEL` (선택, 기본값 `gemini-3.5-flash-lite`, 예: `gemini-3.8-flash`)

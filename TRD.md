@@ -7,18 +7,18 @@
 | 영역 | 선택 | 이유 |
 |---|---|---|
 | 화면 | **HTML + CSS + 순수 JavaScript(ES Modules)**, 빌드 도구 없음 | 연수 교사가 파일을 열어 읽을 수 있음. 4차시 슬라이드의 "내가 정한 HTML·CSS·JS" 방향 |
-| 서버 | **Vercel Serverless Function** 1개: `api/feedback.js` (Node.js 20+) | 4차시 공통 프롬프트(슬라이드 16)와 같은 파일 이름. 키를 숨기는 유일한 자리 |
+| 서버 | **서버 함수** 1개: `api/feedback.js` (Node.js 20+, 로컬은 `dev-server.mjs`) | 4차시 공통 프롬프트(슬라이드 16)와 같은 파일 이름. 키를 숨기는 유일한 자리 |
 | AI | **Gemini API** REST 호출(SDK 없이 `fetch`), JSON 출력 모드 | npm 패키지 설치 없이 동작. 응답을 스키마로 강제 |
 | 모델 | 환경변수 `GEMINI_MODEL`, 기본값 `gemini-2.5-flash` | 무료 등급에서 쓸 수 있는 빠른 모델. **구현 시점에 AI Studio에서 무료 등급 지원 모델명을 다시 확인** |
-| 자료 저장소 | **Vercel Blob** (Vercel 대시보드 Storage 탭에서 생성) + 서버 함수 `api/materials.js` | 자료를 짧은 ID로 저장 → 링크가 짧아져 QR에 담김. Vercel 안에서 만들고 토큰이 환경변수로 자동 연결됨 |
+| 자료 저장소 | **Supabase Storage** (Supabase 대시보드 Storage에서 버킷 생성) + 서버 함수 `api/materials.js` | 자료를 짧은 ID로 저장 → 링크가 짧아져 QR에 담김. 5차시 DB와 같은 Supabase 프로젝트에서 관리 |
 | 공유 | `learn.html?id={8자 ID}` | 약 60자 링크 → QR로 바로 읽힘 |
 | QR | 브라우저에서 생성 (qrcode-generator) | 서버 호출 없음 |
 | 기기 저장 | `localStorage` | 교사 임시 저장, 다문화 결과 재사용, 힌트 횟수 |
-| 배포 | GitHub 저장소 → Vercel 연결 | 4차시 흐름(폴더 1개 = 저장소 1개 = 배포 주소 1개) |
+| 배포 | GitHub 저장소 → Supabase 연결 | 4차시 흐름(폴더 1개 = 저장소 1개 = 배포 주소 1개) |
 
 외부 라이브러리
 - 브라우저(CDN, 정확한 버전): `qrcode-generator@1.4.4` — QR 생성
-- 서버(npm, `package.json`): `@vercel/blob` — Blob 저장·조회. 이 앱의 유일한 npm 의존성(Vercel이 배포 때 자동 설치). 버전은 구현 시점 최신 안정판으로 고정
+- 서버(npm, `package.json`): `@supabase/supabase-js` — Storage 저장·조회. 이 앱의 유일한 npm 의존성. 버전은 구현 시점 최신 안정판으로 고정
 
 ## 2. 폴더 구조
 ```
@@ -38,10 +38,10 @@ level-converter/
 ├─ api/
 │  ├─ feedback.js      # 서버 함수: mode = convert | multicultural | hint
 │  └─ materials.js     # 서버 함수: 자료 저장(POST) · 조회(GET ?id=)
-├─ package.json        # 의존성: @vercel/blob 하나
-├─ vercel.json         # 함수 최대 실행 시간 설정
-├─ .env.local          # (로컬 전용) GEMINI_API_KEY, BLOB_READ_WRITE_TOKEN — 저장소에 올리지 않음
-├─ .gitignore          # .env*, .vercel
+├─ package.json        # 의존성: @supabase/supabase-js 하나
+├─ dev-server.mjs      # 로컬 개발 서버(npm run dev, 포트 5173)
+├─ .env.local          # (로컬 전용) GEMINI_API_KEY, SUPABASE_URL, SUPABASE_SECRET_KEY — 저장소에 올리지 않음
+├─ .gitignore          # .env*
 ├─ CLAUDE.md           # 프로젝트 규칙(키 금지, 파일 역할, 이 TRD 링크)
 ├─ PRD.md
 └─ TRD.md
@@ -50,12 +50,12 @@ level-converter/
 ## 3. 아키텍처와 데이터 흐름
 ```
 [교사 브라우저 index.html]
-   원문 ─▶ js/api.js ─(POST /api/feedback {mode:"convert", level})×3 병렬─▶ [Vercel api/feedback.js]
+   원문 ─▶ js/api.js ─(POST /api/feedback {mode:"convert", level})×3 병렬─▶ [서버 api/feedback.js]
                                                                     │  GEMINI_API_KEY (환경변수)
                                                                     ▼
                                                              [Gemini API]
    ◀── 수준 자료 JSON ×3 ── 검증(schema.js) ── 화면 그리기·수정 ──▶ [저장]
-   ShareDoc ─(POST /api/materials)─▶ [Vercel api/materials.js] ─▶ [Vercel Blob] materials/{id}.json
+   ShareDoc ─(POST /api/materials)─▶ [서버 api/materials.js] ─▶ [Supabase Storage] materials/{id}.json
    ◀── { id } ── learn.html?id={id} ─▶ 링크 복사 · QR
 
 [학생 브라우저 learn.html?id=…]
@@ -65,7 +65,7 @@ level-converter/
    집중 모드(focus.js) → 객관식(브라우저 채점) → 서술형 힌트 POST {mode:"hint", step} ≤3회 → 결과 카드
 ```
 - 학생 화면에서 AI를 부르는 경우는 **다문화 변환**과 **힌트** 둘뿐이다.
-- 학생 화면은 Blob 주소를 직접 알지 못하고 항상 `api/materials.js`를 거친다(5차시에 Supabase로 바꿀 때 이 함수와 `share.js`만 고치면 됨).
+- 학생 화면은 Storage 주소를 직접 알지 못하고 항상 `api/materials.js`를 거친다(5차시에 Supabase 테이블로 바꿀 때 이 함수와 `share.js`만 고치면 됨).
 
 ## 4. 데이터 모델
 ### 4-1. LevelDoc (한 수준의 자료)
@@ -95,7 +95,7 @@ level-converter/
 
 다문화 LevelDoc에는 `"lang": "vi" | "zh" | "ru" | "en" | "mn"`과 `"aiGenerated": true`가 더해진다.
 
-### 4-2. ShareDoc (Blob에 저장하는 전체 자료)
+### 4-2. ShareDoc (Storage에 저장하는 전체 자료)
 ```json
 {
   "v": 1,
@@ -189,10 +189,10 @@ level-converter/
 | 502 | `AI_ERROR` / `BAD_AI_OUTPUT` | AI 응답에 문제가 있어요. 다시 시도해 주세요 |
 | 504 | `TIMEOUT` | 시간이 오래 걸려요. 다시 시도해 주세요 |
 - 서버 → Gemini 요청 제한 시간: convert 50초, multicultural 40초, hint 15초 (`AbortController`)
-- `vercel.json`에서 `api/feedback.js`의 `maxDuration`을 60초로 설정
+- 배포 환경에서 `api/feedback.js`의 최대 실행 시간을 60초 이상으로 설정(설정 위치는 당일 Supabase 공식 문서 확인)
 
 ### 5-5. `api/materials.js` — 자료 저장·조회
-공통: 토큰 `process.env.BLOB_READ_WRITE_TOKEN`(Blob 스토어를 프로젝트에 연결하면 Vercel이 자동 등록). 없으면 500 `NO_STORE`
+공통: `process.env.SUPABASE_URL`·`process.env.SUPABASE_SECRET_KEY`(Supabase 환경변수 Secrets에 등록). 없으면 500 `NO_STORE`
 
 **저장** `POST /api/materials`
 ```json
@@ -203,13 +203,13 @@ level-converter/
 { "id": "k3Fp9QxA" }
 ```
 - 서버 검증: 3수준 모두 LevelDoc 형식(`schema.js`와 같은 규칙), 요청 본문 200KB 이하
-- 저장 위치: Blob 경로 `materials/{id}.json`, `contentType: application/json`, 무작위 접미사 끄기, 덮어쓰기 금지(같은 ID가 있으면 ID를 새로 뽑아 1회 재시도)
+- 저장 위치: Storage 버킷 `materials`의 `{id}.json`, `contentType: application/json`, `upsert: false`(덮어쓰기 금지)(같은 ID가 있으면 ID를 새로 뽑아 1회 재시도)
 - 저장할 때마다 새 ID 발급. 고친 자료는 새 링크가 됨(PRD F-S3)
 
 **조회** `GET /api/materials?id=k3Fp9QxA`
 응답 `200`: ShareDoc
 - `id`는 정규식 `^[A-Za-z0-9]{8}$`만 허용(경로 조작 방지), 아니면 400
-- Blob에서 `materials/{id}.json`을 찾아 읽음. 없으면 404 `NOT_FOUND` → 학생 화면 "자료를 찾을 수 없어요. 선생님께 링크를 다시 받아 주세요"
+- Storage 버킷 `materials`에서 `{id}.json`을 찾아 읽음. 없으면 404 `NOT_FOUND` → 학생 화면 "자료를 찾을 수 없어요. 선생님께 링크를 다시 받아 주세요"
 - 응답 헤더 `Cache-Control: public, max-age=300`(같은 반 30명이 열어도 함수 호출이 몰리지 않게)
 
 | HTTP | `error` | 화면 안내 |
@@ -223,7 +223,7 @@ level-converter/
 - 링크 형식: `https://{배포주소}/learn.html?id={8자 ID}` (약 60자)
 - 교사 화면: [저장] → ID 받음 → 링크 표시 + [복사] + QR(qrcode-generator, 오류 정정 수준 M, 화면 폭 240px 이상)
 - [QR 크게 보기]: 전체 화면으로 QR만 띄워 교실 화면(프로젝터)에 보여 줌
-- Blob 접근 방식: **공개 읽기(public)** 스토어. 경로를 모르면 찾을 수 없지만, ID를 아는 사람은 누구나 자료를 볼 수 있음 → 학습 자료라 허용
+- Storage 접근 방식: **공개(public) 버킷**. 경로를 모르면 찾을 수 없지만, ID를 아는 사람은 누구나 자료를 볼 수 있음 → 학습 자료라 허용
 - 알려진 위험: 객관식 정답(`answer`)이 조회 응답에 들어 있어, 개발자 도구로 정답을 볼 수 있음 → 4차시는 허용, 5차시 "화면에 안 보임 ≠ 접근 불가"(RLS) 수업 사례로 사용
 
 ## 7. 집중 모드 (`focus.js`)
@@ -263,9 +263,9 @@ hint 규칙
 ## 9. 보안·비용 통제
 | 항목 | 방법 |
 |---|---|
-| 키 보관 | Vercel 환경변수 `GEMINI_API_KEY`·`BLOB_READ_WRITE_TOKEN`(Production·Preview), 로컬은 `.env.local`(`vercel env pull`로 받음) |
+| 키 보관 | Supabase 환경변수(Secrets) `GEMINI_API_KEY`·`SUPABASE_URL`·`SUPABASE_SECRET_KEY`, 로컬은 `.env.local`(`.env.example`을 복사해 작성) |
 | 저장 남용 | 누구나 `POST /api/materials`를 부를 수 있음 → 형식 검증·200KB 상한으로 쓰레기 저장을 줄임. 교사 인증은 5차시 이후 과제(문서화) |
-| 저장소 보호 | `.gitignore`에 `.env*`, `.vercel` 포함. 첫 커밋 전에 확인 |
+| 저장소 보호 | `.gitignore`에 `.env*` 포함. 첫 커밋 전에 확인 |
 | 키 노출 점검 | 배포 후 개발자 도구 Sources·Network에서 키 문자열 검색, GitHub 저장소 검색 |
 | 입력 크기 | 원문 6,000자, 학생 답 1,000자, 요청 본문 60KB 초과 시 400 |
 | 호출 횟수 | 힌트: 질문당 3회(브라우저 `localStorage` 기준), 다문화: 언어별 1회 캐시 |
@@ -273,13 +273,12 @@ hint 규칙
 | 화면 출력 | AI 응답·교사 입력을 화면에 넣을 때 `textContent` 사용(`innerHTML` 금지) — 저장소에서 읽은 자료에 스크립트가 섞여도 실행되지 않게 |
 
 ## 10. 로컬 개발과 배포
-1. `vercel` CLI 설치 후 `vercel link`로 프로젝트 연결
-2. Vercel 대시보드 → 프로젝트 → **Storage → Create → Blob**(공개 읽기) → 이 프로젝트에 연결 → `BLOB_READ_WRITE_TOKEN`이 환경변수에 자동 등록됨
-3. Vercel 환경변수에 `GEMINI_API_KEY` 등록(키 값은 대화창·코드에 붙여넣지 않음)
-4. `vercel env pull .env.local`로 두 값을 로컬에 받기 → `.gitignore`에 `.env*`가 있는지 확인
-5. `npm install`(`@vercel/blob`) → 로컬 실행 `vercel dev` → `http://localhost:3000`
-6. GitHub 저장소에 push → Vercel 자동 배포
-7. 환경변수를 새로 등록·변경했으면 **재배포**(등록만 하면 반영 안 됨, 4차시 최다 오류)
+1. `.env.example`을 복사해 `.env.local` 만들기 → `GEMINI_API_KEY` 입력(키 값은 대화창·코드에 붙여넣지 않음) → `.gitignore`에 `.env*`가 있는지 확인
+2. Supabase 대시보드 → 프로젝트 → **Storage → New bucket** `materials`(public) 생성 → Project URL·secret key를 `.env.local`의 `SUPABASE_URL`·`SUPABASE_SECRET_KEY`에 입력
+3. `npm install`(`@supabase/supabase-js`) → 로컬 실행 `npm run dev` → `http://127.0.0.1:5173`
+4. Supabase 환경변수(Secrets)에 `GEMINI_API_KEY`·`SUPABASE_URL`·`SUPABASE_SECRET_KEY` 등록(메뉴 이름·이름 규칙은 당일 Supabase 공식 문서 확인)
+5. GitHub 저장소에 push → GitHub 연동 Supabase 자동 반영
+6. 환경변수를 새로 등록·변경했으면 **재배포**(등록만 하면 반영 안 됨, 4차시 최다 오류)
 
 ## 11. 테스트 계획
 자동 테스트 도구는 두지 않고(빌드 도구 없음 원칙), 아래 시나리오를 수동으로 확인한다. 각 항목은 PRD 8절 체크리스트와 1:1 대응.
@@ -287,19 +286,19 @@ hint 규칙
 |---|---|---|
 | 1 | 트랜스포머 원문 붙여넣기 → [변환] | 30초 안에 3수준 탭이 채워지고 각 수준 질문이 choice·choice·essay |
 | 2 | 보통 본문 수정 → 심화만 [다시 만들기] | 보통 수정 내용 유지, 심화만 바뀜 |
-| 3 | [저장] → 휴대폰으로 QR 찍기 | 링크 약 60자, QR이 바로 읽히고 같은 제목·본문이 열림. Vercel Storage 화면에 `materials/{id}.json` 생성 확인 |
+| 3 | [저장] → 휴대폰으로 QR 찍기 | 링크 약 60자, QR이 바로 읽히고 같은 제목·본문이 열림. Supabase Storage `materials` 버킷에 `{id}.json` 생성 확인 |
 | 4 | 다문화+베트남어 → 뒤로 → 다시 베트남어 | 두 번째는 네트워크 요청 없음(개발자 도구 Network 확인) |
 | 5 | 집중 시작 → 다른 탭 10초 → 복귀 | "자리를 비웠어요(1번째)", 집중 시간이 약 10초 덜 증가 |
 | 6 | 서술형 빈칸으로 힌트 3번 | 1→2→3단계 내용이 다르고 정답 문장 없음, 4번째는 버튼 잠김 |
 | 7 | 객관식 2개 풀고 [제출] | 결과 카드에 점수·집중 시간·이탈 횟수·힌트 단계 |
 | 8 | 환경변수 삭제 후 [변환] | "서버 설정(환경변수)을 확인해 주세요" |
 | 9 | `?id=`를 없는 값·이상한 값(`../x`)으로 바꿔 열기 | "자료를 찾을 수 없어요"/"링크 주소가 올바르지 않아요" 안내, 화면 멈춤 없음 |
-| 11 | Blob 스토어 연결을 끊은 뒤 [저장] | "저장소 연결(환경변수)을 확인해 주세요" |
+| 11 | Supabase 환경변수를 지운 뒤 [저장] | "저장소 연결(환경변수)을 확인해 주세요" |
 | 10 | 키 노출 점검(9절) | 키 문자열 검색 결과 0건 |
 
 ## 12. 구현 순서 (Sonnet에게 한 단계씩 요청)
-1. 폴더 구조·`.gitignore`·`CLAUDE.md`·`package.json` 만들기, GitHub·Vercel 연결, Blob 스토어 생성(10절)
-2. `api/feedback.js` convert 모드 + `vercel dev`로 응답 JSON 확인
+1. 폴더 구조·`.gitignore`·`CLAUDE.md`·`package.json` 만들기, GitHub·Supabase 연결, Storage 버킷 생성(10절)
+2. `api/feedback.js` convert 모드 + `npm run dev`로 응답 JSON 확인
 3. `index.html` 원문 입력 → 3수준 병렬 변환 → 탭 표시
 4. 수정·[다시 만들기]
 5. `api/materials.js` 저장·조회 → `share.js` → 링크·QR
@@ -312,10 +311,10 @@ hint 규칙
 ## 13. 5차시 확장 지점
 | 지금(4차시) | 5차시에 바뀌는 것 |
 |---|---|
-| 자료를 Blob 파일(`materials/{id}.json`)로 저장 | Supabase `materials` 테이블로 이전(ID·링크 형식은 그대로) |
+| 자료를 Storage 파일(`materials/{id}.json`)로 저장 | Supabase `materials` 테이블로 이전(ID·링크 형식은 그대로) |
 | 결과 카드만 표시 | `answers`(class_code, student_no, level, question_no, answer, created_at) 저장, 학생 번호 입력 추가 |
 | 정답이 조회 응답에 들어 있음 | 정답은 DB에 두고 RLS로 학생 조회 차단 |
 | 누구나 자료 저장 가능 | 교사 구분(학급 코드)·자료 목록 관리 |
 | 힌트 제한이 브라우저 기준 | DB 기준 제한 가능 |
-- **5차시 도입 동기 정리**: Blob은 "파일을 통째로 넣고 꺼내는 상자"라 학생 30명의 답을 행 단위로 모으고, 조건으로 찾고, 접근 권한을 나누기 어렵다 → 표(테이블)와 권한(RLS)이 있는 DB가 필요
-- 이를 위해 `js/share.js`의 `saveDoc()`·`loadDoc()`와 `api/materials.js`의 요청·응답 형식을 지켜, 5차시에는 저장소 쪽만 Supabase로 바꾸면 되게 한다.
+- **5차시 도입 동기 정리**: Storage는 "파일을 통째로 넣고 꺼내는 상자"라 학생 30명의 답을 행 단위로 모으고, 조건으로 찾고, 접근 권한을 나누기 어렵다 → 표(테이블)와 권한(RLS)이 있는 DB가 필요
+- 이를 위해 `js/share.js`의 `saveDoc()`·`loadDoc()`와 `api/materials.js`의 요청·응답 형식을 지켜, 5차시에는 저장 위치만 Supabase 테이블로 바꾸면 되게 한다.
