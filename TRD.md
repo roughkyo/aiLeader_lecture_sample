@@ -1,320 +1,361 @@
 # TRD — 수준별 학습자료 변환기
 
-> 요구사항: [PRD.md](PRD.md) · 근거: [설계명세서.md](설계명세서.md)
-> 버전: v1 (2026-11-26) · 상태: 구현 전 · 구현 모델: Claude Code **Sonnet 5.5** (기획·설계는 Opus)
+> 요구사항: [PRD.md](PRD.md) · 근거: [설계명세서.md](설계명세서.md) · 사용법: [README.md](README.md)
+> 버전: **v2 (2026-11-26) · 상태: 구현 완료, 이 문서는 실제 소스 코드 기준** · 구현 모델: Claude Code **Sonnet 5.5** (기획·설계는 Opus)
+> v1(구현 전 설계)과 달라진 점은 13절에 정리함
 
 ## 1. 기술 선택 요약
 | 영역 | 선택 | 이유 |
 |---|---|---|
 | 화면 | **HTML + CSS + 순수 JavaScript(ES Modules)**, 빌드 도구 없음 | 연수 교사가 파일을 열어 읽을 수 있음. 4차시 슬라이드의 "내가 정한 HTML·CSS·JS" 방향 |
-| 서버 | **서버 함수** 1개: `api/feedback.js` (Node.js 20+, 로컬은 `dev-server.mjs`) | 4차시 공통 프롬프트(슬라이드 16)와 같은 파일 이름. 키를 숨기는 유일한 자리 |
-| AI | **Gemini API** REST 호출(SDK 없이 `fetch`), JSON 출력 모드 | npm 패키지 설치 없이 동작. 응답을 스키마로 강제 |
-| 모델 | 환경변수 `GEMINI_MODEL`, 기본값 `gemini-2.5-flash` | 무료 등급에서 쓸 수 있는 빠른 모델. **구현 시점에 AI Studio에서 무료 등급 지원 모델명을 다시 확인** |
-| 자료 저장소 | **Supabase Storage** (Supabase 대시보드 Storage에서 버킷 생성) + 서버 함수 `api/materials.js` | 자료를 짧은 ID로 저장 → 링크가 짧아져 QR에 담김. 5차시 DB와 같은 Supabase 프로젝트에서 관리 |
-| 공유 | `learn.html?id={8자 ID}` | 약 60자 링크 → QR로 바로 읽힘 |
-| QR | 브라우저에서 생성 (qrcode-generator) | 서버 호출 없음 |
-| 기기 저장 | `localStorage` | 교사 임시 저장, 다문화 결과 재사용, 힌트 횟수 |
-| 배포 | GitHub 저장소 → Supabase 연결 | 4차시 흐름(폴더 1개 = 저장소 1개 = 배포 주소 1개) |
+| 학습 자료 | `materials/*.md` 4종(기초·보통·심화·다문화) + `materials/activities.json` | 교사가 Claude Code 대화로 만들고 검토한 파일을 그대로 씀. **자료 생성에는 API를 쓰지 않음** |
+| 마크다운 표시 | CDN `marked@12.0.2` + `dompurify@3.1.6` | md를 HTML로 바꾼 뒤 DOMPurify로 정리해서 화면에 넣음 |
+| 서버 함수 | **`api/feedback.js` 1개** (Node.js 20+, `export default async function handler(req, res)`) | Gemini 키를 숨기는 유일한 자리. 소크라테스식 힌트만 담당 |
+| AI | **Gemini Interactions API** (`POST /v1beta/interactions`), SDK 없이 `fetch` 호출 | npm 패키지 없이 동작. 응답을 JSON 스키마로 강제 |
+| 모델 | 환경변수 `GEMINI_MODEL`, 기본값 **`gemini-3.5-flash-lite`** (`gemini-3.8-flash`로 바꿔 쓸 수 있음) | 무료 등급에서 빠르게 응답. 모델명은 연수 당일 AI Studio에서 다시 확인 |
+| 추론 강도 | 환경변수 `GEMINI_THINKING_LEVEL`, 기본값 **`low`** | 두 모델 공통으로 쓸 수 있는 값 |
+| 로컬 실행 | `dev-server.mjs` (`npm run dev`, 외부 패키지 없음) | 정적 파일 + `/api/feedback`을 한 번에 실행 |
+| 기기 저장 | **쓰지 않음** (`localStorage`·쿠키 없음) | 집중 기록·답·힌트는 메모리에만 두고 화면에만 표시 |
+| 배포 | GitHub 저장소 → Supabase 연계 | 폴더 1개 = 저장소 1개 = 배포 주소 1개. 서버 함수 형식 변환은 11-2 참고 |
 
-외부 라이브러리
-- 브라우저(CDN, 정확한 버전): `qrcode-generator@1.4.4` — QR 생성
-- 서버(npm, `package.json`): `@supabase/supabase-js` — Storage 저장·조회. 이 앱의 유일한 npm 의존성. 버전은 구현 시점 최신 안정판으로 고정
+외부 의존성
+- 브라우저(CDN, 정확한 버전 고정): `marked@12.0.2`, `dompurify@3.1.6`
+- 서버: **없음** (`package.json`에 dependencies 없음, `engines.node >= 20`)
 
 ## 2. 폴더 구조
 ```
-level-converter/
-├─ index.html          # 교사: 원문 입력 → 변환 → 검토·수정 → 저장·공유
-├─ learn.html          # 학생: 수준 선택 → 집중 모드 → 확인 질문·힌트 → 결과 카드
-├─ css/
-│  └─ style.css
+level-reader/                  # package.json의 name
+├─ index.html                  # 학생 화면: 수준 선택 → 읽기 → 집중 모드 → 활동·형성평가·힌트
+├─ css/style.css
 ├─ js/
-│  ├─ api.js           # /api/feedback 호출 래퍼 (모드별 함수, 오류 메시지 변환)
-│  ├─ schema.js        # 수준 자료 검증(형식·개수·정답 범위)
-│  ├─ share.js         # saveDoc()·loadDoc()(/api/materials 호출), 공유 링크 만들기, QR 그리기
-│  ├─ storage.js       # localStorage 읽기·쓰기(try/catch 포함)
-│  ├─ teacher.js       # index.html 동작
-│  ├─ learner.js       # learn.html 동작
-│  └─ focus.js         # 집중 모드(전체 화면·이탈 감지·타이머)
+│  ├─ app.js                   # 화면 전환, materials/*.md 읽기·표시, 다문화 모드 전환
+│  ├─ reader-tools.js          # 글자 크기 3단계, 음성 읽어 주기(TTS), 다문화 낱말 밑줄·뜻 말풍선
+│  ├─ focus.js                 # 집중 모드(전체 화면·이탈 감지·집중 시간)
+│  └─ activities.js            # 본문 중간 활동, 형성평가, 서술형 힌트 요청 UI
+├─ materials/
+│  ├─ 기초.md · 보통.md · 심화.md · 다문화.md
+│  ├─ activities.json          # 수준별 활동·형성평가 문항과 정답
+│  └─ 원문대비_변경점.md        # 교사 검토용
 ├─ api/
-│  ├─ feedback.js      # 서버 함수: mode = convert | multicultural | hint
-│  └─ materials.js     # 서버 함수: 자료 저장(POST) · 조회(GET ?id=)
-├─ package.json        # 의존성: @supabase/supabase-js 하나
-├─ dev-server.mjs      # 로컬 개발 서버(npm run dev, 포트 5173)
-├─ .env.local          # (로컬 전용) GEMINI_API_KEY, SUPABASE_URL, SUPABASE_SECRET_KEY — 저장소에 올리지 않음
-├─ .gitignore          # .env*
-├─ CLAUDE.md           # 프로젝트 규칙(키 금지, 파일 역할, 이 TRD 링크)
-├─ PRD.md
-└─ TRD.md
+│  └─ feedback.js              # 서버 함수: POST /api/feedback (mode = hint)
+├─ dev-server.mjs              # 로컬 개발 서버(포트 5173)
+├─ package.json                # scripts.dev = node dev-server.mjs
+├─ .env.example                # 환경변수 견본(진짜 키 금지)
+├─ .env.local                  # (로컬 전용) 실제 키 — .gitignore로 제외
+├─ .gitignore                  # .env, .env.* 제외(.env.example만 허용)
+├─ 원문_트랜스포머_v1.md · 원문_트랜스포머_v2.md
+└─ 설계명세서.md · PRD.md · TRD.md · README.md
 ```
 
 ## 3. 아키텍처와 데이터 흐름
 ```
-[교사 브라우저 index.html]
-   원문 ─▶ js/api.js ─(POST /api/feedback {mode:"convert", level})×3 병렬─▶ [서버 api/feedback.js]
-                                                                    │  GEMINI_API_KEY (환경변수)
-                                                                    ▼
-                                                             [Gemini API]
-   ◀── 수준 자료 JSON ×3 ── 검증(schema.js) ── 화면 그리기·수정 ──▶ [저장]
-   ShareDoc ─(POST /api/materials)─▶ [서버 api/materials.js] ─▶ [Supabase Storage] materials/{id}.json
-   ◀── { id } ── learn.html?id={id} ─▶ 링크 복사 · QR
+[교사 — Claude Code 대화, API 사용 안 함]
+   원문_트랜스포머_v2.md ─▶ 기초·보통·심화·다문화.md + activities.json 생성 ─▶ 교사 검토 ─▶ 커밋·푸시
 
-[학생 브라우저 learn.html?id=…]
-   GET /api/materials?id=… → ShareDoc → 수준 선택
-     ├ 기초·보통·심화: 링크 속 자료 그대로 사용 (AI 호출 없음)
-     └ 다문화+언어: localStorage 확인 → 없으면 POST {mode:"multicultural"} → 저장
-   집중 모드(focus.js) → 객관식(브라우저 채점) → 서술형 힌트 POST {mode:"hint", step} ≤3회 → 결과 카드
+[학생 브라우저 index.html]
+   수준 카드 선택 ─▶ GET materials/{수준}.md ─▶ marked → DOMPurify → 화면
+                 └▶ GET materials/activities.json ─▶ 본문 중간 활동·형성평가(브라우저에서 채점)
+   서술형 [💡 힌트 받기] ─(POST /api/feedback {mode:"hint", step, …})─▶ [서버 함수 api/feedback.js]
+                                                                       │  GEMINI_API_KEY (환경변수)
+                                                                       ▼
+                                                    [Gemini Interactions API  POST /v1beta/interactions]
+   ◀────────────── 200 { step, hint } ◀── JSON 파싱 · 정답 누출 검사(최대 2회 호출) ◀──┘
 ```
-- 학생 화면에서 AI를 부르는 경우는 **다문화 변환**과 **힌트** 둘뿐이다.
-- 학생 화면은 Storage 주소를 직접 알지 못하고 항상 `api/materials.js`를 거친다(5차시에 Supabase 테이블로 바꿀 때 이 함수와 `share.js`만 고치면 됨).
+- **Gemini를 부르는 곳은 서술형 힌트 1곳뿐**임. 수준 변환·다문화 자료는 미리 만든 md 파일을 읽음
+- 객관식·골라 넣기·빈칸·중요 단어 찾기·서술형 핵심어 점검은 모두 브라우저에서 채점함(서버 호출 없음)
 
-## 4. 데이터 모델
-### 4-1. LevelDoc (한 수준의 자료)
+## 4. 데이터 형식
+### 4-1. 수준별 자료 `materials/*.md`
+| 파일 | 수준 키 | 표시 |
+|---|---|---|
+| `기초.md` | `basic` | 기초 |
+| `보통.md` | `normal` | 보통 |
+| `심화.md` | `advanced` | 심화 |
+| `다문화.md` | `multicultural` | 다문화(쉬운 한국어, 줄바꿈 유지) |
+
+학생 화면에 넣기 전에 `app.js`가 잘라 내는 부분
+- 맨 위 `>` 안내 인용문(대상·원문 링크)
+- `## 확인 질문` 절부터 끝까지(형성평가는 `activities.json`이 대신함)
+- `### 정답(교사용)` 절부터 끝까지
+
+다문화 낱말 풀이: 본문의 `## … 낱말 풀이 …` 제목 바로 뒤 표를 읽음. 열 제목에서 "베트남어"·"중국어"를 찾아 언어별 뜻 열로 씀
+
+### 4-2. 활동·형성평가 `materials/activities.json`
 ```json
 {
-  "level": "basic",
-  "body": "쉬운 말로 다시 쓴 본문(문단은 \\n\\n로 구분)",
-  "glossary": [
-    { "word": "토큰", "meaning": "글을 잘게 나눈 조각", "native": null }
-  ],
-  "questions": [
-    { "id": "q1", "type": "choice", "q": "질문", "options": ["①", "②", "③", "④"], "answer": 1 },
-    { "id": "q2", "type": "choice", "q": "질문", "options": ["①", "②", "③", "④"], "answer": 3 },
-    { "id": "q3", "type": "essay",  "q": "질문", "keyPoints": ["확률", "앞 단어"], "evidence": "답이 들어 있는 본문 문장 일부" }
-  ]
+  "version": 1,
+  "note": "…",
+  "levels": {
+    "normal": {
+      "inline": [
+        { "id": "n-i1", "after": "2", "type": "choice", "title": "하나 고르기",
+          "q": "…", "options": ["…", "…", "…", "…"], "answer": 0, "explain": "… (2절)" }
+      ],
+      "quiz": [
+        { "id": "n-q5", "type": "essay", "q": "…",
+          "keyPoints": [ { "label": "다음 단어를 예측함", "any": ["예측"] } ],
+          "model": "모범 답안 문장", "explain": "(5절)" }
+      ]
+    }
+  }
 }
 ```
 | 필드 | 규칙 |
 |---|---|
-| `level` | `basic` · `normal` · `advanced` · `multicultural` (화면 표시는 기초·보통·심화·다문화) |
-| `glossary` | 4~8개. `native`는 다문화에서만 문자열, 나머지는 `null` |
-| `questions` | 정확히 3개, 순서 고정: choice, choice, essay |
-| `options` | 정확히 4개 |
-| `answer` | **0부터 시작하는 보기 번호(0~3)** |
-| `keyPoints` | 서술형 채점 대신 힌트 2단계에 쓰는 핵심 낱말 2~4개 |
-| `evidence` | 힌트 3단계에서 본문 위치를 짚는 데 쓰는 문장 일부 |
+| `levels` | `basic`·`normal`·`advanced`·`multicultural` 4개 |
+| `inline` | 본문 중간 활동 4개. `after`는 몇 번째 절 뒤에 넣을지(절 번호 문자열) |
+| `quiz` | 형성평가 5개: `choice`, `choice`, `select`, `blank`, `essay` |
+| `type` | `choice`(하나 고르기) · `select`(골라 넣기) · `blank`(빈칸 채우기) · `highlight`(중요 단어 찾기) · `essay`(서술형) |
+| `answer` | 0부터 시작하는 보기 번호 |
+| `keyPoints` | 서술형 핵심어 점검용. `label`은 힌트 요청에 보내는 핵심 내용, `any`는 학생 답에서 찾을 낱말 목록 |
+| `model` | 서술형 모범 답안. 힌트 요청의 `modelAnswer`로 보내 정답 누출 검사에 씀 |
 
-다문화 LevelDoc에는 `"lang": "vi" | "zh" | "ru" | "en" | "mn"`과 `"aiGenerated": true`가 더해진다.
-
-### 4-2. ShareDoc (Storage에 저장하는 전체 자료)
-```json
-{
-  "v": 1,
-  "id": "k3Fp9QxA",
-  "title": "GPT의 어머니, 트랜스포머",
-  "createdAt": "2026-11-26T09:00:00+09:00",
-  "levels": { "basic": { }, "normal": { }, "advanced": { } }
-}
-```
-- `id`는 서버가 저장할 때 붙인다(8자, 영문 대소문자+숫자, `crypto.randomBytes` 기반). 교사가 보낸 값은 무시
-- 날짜는 ISO 8601(한국 시간 오프셋 포함)
-- `v`는 형식 버전. 학생 화면은 `v`가 다르면 "자료 형식이 맞지 않습니다" 안내
-- 다문화 자료는 ShareDoc에 넣지 않는다(학생 기기에서 생성)
-
-### 4-3. localStorage 키
-| 키 | 값 | 사용 |
-|---|---|---|
-| `lc:draft` | 교사 작업 중 ShareDoc | 새로고침 복구(P1) |
-| `lc:mc:{docId}:{lang}` | 다문화 LevelDoc | 같은 언어 재호출 방지 |
-| `lc:hint:{docId}:{level}:{qid}` | `{ "used": 2, "hints": ["…", "…"] }` | 힌트 횟수·내용 유지 |
-| `lc:session:{docId}` | 집중 기록·객관식 응답 | 새로고침해도 결과 유지 |
-
-- `docId` = ShareDoc의 `id`
-- 모든 읽기·쓰기는 try/catch로 감싸고, 실패해도 화면은 동작해야 한다(시크릿 창 대비)
+### 4-3. 브라우저 상태
+- 받은 힌트, 집중 시간·이탈 횟수, 답과 점수는 **메모리에만** 둠. 새로고침하면 사라짐
+- `localStorage`·`sessionStorage`·쿠키를 쓰지 않음
 
 ## 5. 서버 API 명세 — `POST /api/feedback`
-공통
-- 요청·응답 `Content-Type: application/json`
-- 키: `process.env.GEMINI_API_KEY` (없으면 500 + `{"error":"NO_KEY"}`)
-- 모델: `process.env.GEMINI_MODEL || "gemini-2.5-flash"`
-- Gemini 호출: `POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`, 헤더 `x-goog-api-key`에 키(쿼리 문자열에 키를 넣지 않음)
-- `generationConfig`: `responseMimeType: "application/json"`, `responseSchema`(모드별), `temperature`(아래 표)
-- 응답 JSON을 서버에서 한 번 더 검증. 형식이 틀리면 **1회 재시도**, 그래도 틀리면 502 `BAD_AI_OUTPUT`
-- 서버는 받은 원문·학생 답을 로그에 남기지 않는다(`console.log`에 본문 출력 금지)
+### 5-1. 공통
+- 요청·응답 `Content-Type: application/json`. 응답 헤더 `Cache-Control: no-store`
+- `POST`가 아니면 405 `METHOD_NOT_ALLOWED` + `Allow: POST`
+- 키: `process.env.GEMINI_API_KEY`(앞뒤 공백 제거). 없으면 500 `NO_KEY`
+- 요청 본문이 문자열이면 서버에서 `JSON.parse`. 실패하면 400 `BAD_REQUEST`
+- 서버는 원문·학생 답·질문을 로그에 남기지 않음. 오류 로그에는 HTTP 상태와 모델 이름만 남김
 
-### 5-1. `mode: "convert"` — 교사 수준 변환
-요청
-```json
-{ "mode": "convert", "level": "basic", "title": "…", "source": "원문(최대 6,000자)" }
-```
-응답 `200`: LevelDoc (`level` = 요청값)
-| 항목 | 값 |
-|---|---|
-| temperature | 0.4 |
-| 호출 방식 | 교사 화면이 basic·normal·advanced **3개를 병렬 호출**. [이 수준 다시 만들기]는 같은 요청 1개 |
-| 입력 검증 | `source` 50~6,000자, `level` 3종 중 하나 |
-
-### 5-2. `mode: "multicultural"` — 학생 다문화 변환
-요청
-```json
-{ "mode": "multicultural", "lang": "vi", "base": { "...기초 LevelDoc..." } }
-```
-응답 `200`: LevelDoc (`level: "multicultural"`, `lang`, `aiGenerated: true`, glossary마다 `native` 채움)
-| 항목 | 값 |
-|---|---|
-| temperature | 0.3 |
-| 입력 | 기초 자료(원문 아님) → 쉬운 한국어로 다시 쓰고 질문은 기초와 같은 뜻 유지 |
-| 입력 검증 | `lang` 5종 중 하나, `base`가 LevelDoc 형식 |
-
-### 5-3. `mode: "hint"` — 소크라테스식 힌트
-요청
+### 5-2. 요청
 ```json
 {
-  "mode": "hint", "step": 1, "level": "normal", "lang": null,
-  "question": "서술형 질문", "keyPoints": ["확률", "앞 단어"], "evidence": "본문 문장 일부",
-  "body": "해당 수준 본문", "studentAnswer": "학생이 지금까지 쓴 답(빈칸 가능, 최대 1,000자)",
-  "previousHints": ["1단계 힌트"]
+  "mode": "hint",
+  "step": 1,
+  "level": "normal",
+  "lang": null,
+  "question": "서술형 질문",
+  "keyPoints": ["다음 단어를 예측함", "예측한 단어를 다시 입력에 붙임"],
+  "studentAnswer": "학생이 지금까지 쓴 답(빈칸 가능)",
+  "studentQuestion": "학생이 AI에게 물어본 궁금한 점(빈칸이면 바로 힌트)",
+  "previousHints": [],
+  "body": "지금 읽는 수준의 본문 텍스트",
+  "modelAnswer": "모범 답안 — 누출 검사용"
 }
 ```
-응답 `200`
+| 필드 | 검사 규칙(`validate()`) | 브라우저에서 넣는 값 |
+|---|---|---|
+| `mode` | `"hint"`만 허용 | 고정값 |
+| `step` | 1·2·3 중 하나 | 받은 힌트 수 + 1 |
+| `level` | `basic`·`normal`·`advanced`·`multicultural` | 지금 수준 |
+| `lang` | `null`/생략, 또는 `vi`·`zh`·`ru`·`en`·`mn` | 다문화 수준일 때만 언어 선택값(`vi`·`zh`), 그 밖에는 `null` |
+| `question` | 문자열, 500자 이하, 빈칸 금지 | `item.q` |
+| `keyPoints` | 배열 6개 이하, 각 100자 이하 | `item.keyPoints[].label` |
+| `studentAnswer` | 1,000자 이하(생략 가능) | 답 칸 값(앞 1,000자) |
+| `studentQuestion` | 300자 이하(생략 가능) | 질문 칸 값(입력 칸도 `maxlength=300`) |
+| `previousHints` | 길이가 정확히 `step - 1`, 각 500자 이하 | 이미 받은 힌트 |
+| `body` | 8,000자 이하(생략 가능) | 화면 본문에서 활동·표를 뺀 텍스트(앞 8,000자) |
+| `modelAnswer` | 600자 이하(생략 가능) | `item.model` |
+
+### 5-3. 응답 `200`
 ```json
 { "step": 1, "hint": "모델이 다음 단어를 고를 때 무엇을 보고 고를까요?" }
 ```
-| 단계 | 내용 | 쓰는 재료 |
-|---|---|---|
-| 1 되묻기 | 학생 답을 보고 생각을 여는 질문 1~2문장 | question, studentAnswer |
-| 2 단서 | 핵심 낱말을 넣어 다시 써 보라는 안내 | keyPoints 중 학생 답에 없는 것 |
-| 3 본문 위치 | 답이 있는 본문 부분을 짚음(몇 번째 문단, 어떤 낱말 근처) | evidence, body |
-- temperature 0.5
-- 서버 검증: `step` 1~3, `previousHints` 길이 = `step - 1`
-- **정답 누출 방지**: 응답 `hint`에 `evidence` 문장이 20자 이상 그대로 들어 있으면 1회 재생성 요청
-- 다문화(`lang` 있음): 쉬운 한국어 + 핵심 낱말 뒤 괄호에 모국어
 
-### 5-4. 오류 응답
-| HTTP | `error` | 화면 안내 |
-|---|---|---|
-| 400 | `BAD_REQUEST` | 입력을 확인해 주세요 |
-| 405 | `METHOD_NOT_ALLOWED` | — |
-| 429 | `RATE_LIMIT` (Gemini 429) | 요청이 많아요. 30초 뒤 다시 시도해 주세요 |
-| 500 | `NO_KEY` | 서버 설정(환경변수)을 확인해 주세요 — 교사 화면에서만 노출 |
-| 502 | `AI_ERROR` / `BAD_AI_OUTPUT` | AI 응답에 문제가 있어요. 다시 시도해 주세요 |
-| 504 | `TIMEOUT` | 시간이 오래 걸려요. 다시 시도해 주세요 |
-- 서버 → Gemini 요청 제한 시간: convert 50초, multicultural 40초, hint 15초 (`AbortController`)
-- 배포 환경에서 `api/feedback.js`의 최대 실행 시간을 60초 이상으로 설정(설정 위치는 당일 Supabase 공식 문서 확인)
+### 5-4. 힌트 단계 규칙(시스템 지시문에 들어가는 문장)
+| 단계 | 규칙 |
+|---|---|
+| 1 되묻기 | 학생의 답을 보고 생각을 여는 질문을 하나만 함. 개념 이름을 직접 알려 주지 않음 |
+| 2 단서 | 학생 답에 빠진 핵심 개념 하나를 낱말 단서로만 제시하고, 그 낱말을 넣어 다시 써 보라고 안내함 |
+| 3 본문 위치 | 답이 들어 있는 본문 위치(몇 번째 절, 어떤 낱말 근처)를 짚고 그 부분을 다시 읽어 보라고 안내함 |
 
-### 5-5. `api/materials.js` — 자료 저장·조회
-공통: `process.env.SUPABASE_URL`·`process.env.SUPABASE_SECRET_KEY`(Supabase 환경변수 Secrets에 등록). 없으면 500 `NO_STORE`
+### 5-5. 정답 누출 방지
+1. 힌트와 `modelAnswer`에서 공백과 `.,!?'"()`를 지움
+2. 모범 답안을 15자 창으로 3자씩 밀면서 잘라, 그 조각이 힌트 안에 그대로 있으면 누출로 판단
+3. 누출이면 "모범 답안의 표현을 하나도 쓰지 말고 질문 형태로만 답하라"는 문장을 더해 **1회 다시 호출**
+4. 다시 누출이면 단계별 대체 힌트를 씀
 
-**저장** `POST /api/materials`
-```json
-{ "v": 1, "title": "…", "createdAt": "2026-11-26T09:00:00+09:00", "levels": { "basic": {}, "normal": {}, "advanced": {} } }
+| 단계 | 대체 힌트 |
+|---|---|
+| 1 | 질문이 무엇을 묻는지 한 번 더 읽어 볼까요? 본문에서 비슷한 낱말을 찾아보세요. |
+| 2 | 본문에 나온 핵심 낱말을 하나 골라 넣어서 다시 써 볼까요? |
+| 3 | 본문에서 질문과 같은 낱말이 나오는 절을 다시 읽어 볼까요? |
+
+- 힌트 1번 요청에 Gemini 호출은 **최대 2회**
+
+### 5-6. 오류 응답과 화면 안내
+| HTTP | `error` | 발생 조건 | 화면 안내(`activities.js` `HINT_ERRORS`) |
+|---|---|---|---|
+| 400 | `BAD_REQUEST` (+ `detail`) | 5-2 검사 실패, JSON 파싱 실패 | 요청 형식이 맞지 않아요. |
+| 405 | `METHOD_NOT_ALLOWED` | POST가 아님 | 기본 문구 |
+| 500 | `NO_KEY` | `GEMINI_API_KEY` 없음 | 서버에 GEMINI_API_KEY가 없어요. .env.local 또는 배포 환경변수를 확인해 주세요. |
+| 429 | `RATE_LIMIT` | Gemini가 429 반환 | 요청이 많아요. 30초쯤 뒤에 다시 눌러 주세요. |
+| 502 | `BAD_KEY` | Gemini 400·401·403 + 오류 본문에 api key·unauthenticated·permission | API 키가 올바르지 않아요. AI Studio에서 키를 다시 확인해 주세요. |
+| 502 | `AI_ERROR` | 그 밖의 Gemini 오류, 네트워크 실패 | 기본 문구 |
+| 502 | `BAD_AI_OUTPUT` | 출력이 JSON이 아니거나 `hint`가 비어 있음(재시도 없음) | 기본 문구 |
+| 504 | `TIMEOUT` | Gemini 응답 25초 초과(`AbortController`) | 힌트를 만드는 데 시간이 오래 걸려요. 다시 눌러 주세요. |
+| 500 | `AI_ERROR` | 예상하지 못한 서버 오류 | 기본 문구 |
+| — | `NO_SERVER` | JSON이 아닌 404·405·501 응답(정적 서버로 연 경우) | 힌트 서버가 켜져 있지 않아요. 로컬 개발 서버(npm run dev)로 실행했는지 확인해 주세요. |
+| — | `NETWORK` | `fetch` 자체 실패 | 인터넷 연결을 확인해 주세요. |
+
+- 기본 문구: "힌트를 받지 못했어요. 잠시 뒤 다시 눌러 주세요."
+- 로컬 개발 서버는 요청 본문이 1MB를 넘으면 413 `SERVER_ERROR`를 돌려줌
+
+## 6. Gemini 호출 세부 (`callGemini()`)
+요청
+```http
+POST https://generativelanguage.googleapis.com/v1beta/interactions
+Content-Type: application/json
+x-goog-api-key: {GEMINI_API_KEY}
+Api-Revision: 2026-05-20
 ```
-응답 `201`
 ```json
-{ "id": "k3Fp9QxA" }
+{
+  "model": "gemini-3.5-flash-lite",
+  "system_instruction": "…7절 시스템 지시문…",
+  "input": "…7절 사용자 입력…",
+  "store": false,
+  "generation_config": { "max_output_tokens": 1024, "thinking_level": "low" },
+  "response_format": {
+    "type": "text",
+    "mime_type": "application/json",
+    "schema": {
+      "type": "object",
+      "properties": { "hint": { "type": "string" } },
+      "required": ["hint"],
+      "additionalProperties": false
+    }
+  }
+}
 ```
-- 서버 검증: 3수준 모두 LevelDoc 형식(`schema.js`와 같은 규칙), 요청 본문 200KB 이하
-- 저장 위치: Storage 버킷 `materials`의 `{id}.json`, `contentType: application/json`, `upsert: false`(덮어쓰기 금지)(같은 ID가 있으면 ID를 새로 뽑아 1회 재시도)
-- 저장할 때마다 새 ID 발급. 고친 자료는 새 링크가 됨(PRD F-S3)
-
-**조회** `GET /api/materials?id=k3Fp9QxA`
-응답 `200`: ShareDoc
-- `id`는 정규식 `^[A-Za-z0-9]{8}$`만 허용(경로 조작 방지), 아니면 400
-- Storage 버킷 `materials`에서 `{id}.json`을 찾아 읽음. 없으면 404 `NOT_FOUND` → 학생 화면 "자료를 찾을 수 없어요. 선생님께 링크를 다시 받아 주세요"
-- 응답 헤더 `Cache-Control: public, max-age=300`(같은 반 30명이 열어도 함수 호출이 몰리지 않게)
-
-| HTTP | `error` | 화면 안내 |
+| 항목 | 값 | 비고 |
 |---|---|---|
-| 400 | `BAD_REQUEST` | 자료 형식을 확인해 주세요 / 링크 주소가 올바르지 않아요 |
-| 404 | `NOT_FOUND` | 자료를 찾을 수 없어요 |
-| 413 | `TOO_LARGE` | 자료가 너무 커요. 원문을 줄여 주세요 |
-| 500 | `NO_STORE` | 저장소 연결(환경변수)을 확인해 주세요 — 교사 화면에서만 노출 |
+| 키 전달 | `x-goog-api-key` 헤더 | 주소(쿼리 문자열)에 키를 넣지 않음 |
+| `store` | `false` | 학생 답·본문을 Gemini 쪽에 저장하지 않음 |
+| `temperature` 등 샘플링 값 | 보내지 않음 | 지원 중단된 파라미터라 제거함 |
+| `max_output_tokens` | 1024 | 힌트는 1~2문장 |
+| 제한 시간 | 25초 | 넘으면 504 `TIMEOUT` |
 
-## 6. 공유 링크와 QR
-- 링크 형식: `https://{배포주소}/learn.html?id={8자 ID}` (약 60자)
-- 교사 화면: [저장] → ID 받음 → 링크 표시 + [복사] + QR(qrcode-generator, 오류 정정 수준 M, 화면 폭 240px 이상)
-- [QR 크게 보기]: 전체 화면으로 QR만 띄워 교실 화면(프로젝터)에 보여 줌
-- Storage 접근 방식: **공개(public) 버킷**. 경로를 모르면 찾을 수 없지만, ID를 아는 사람은 누구나 자료를 볼 수 있음 → 학습 자료라 허용
-- 알려진 위험: 객관식 정답(`answer`)이 조회 응답에 들어 있어, 개발자 도구로 정답을 볼 수 있음 → 4차시는 허용, 5차시 "화면에 안 보임 ≠ 접근 불가"(RLS) 수업 사례로 사용
+응답 처리
+- `steps[]` 가운데 `type: "model_output"`인 항목의 `content[]`에서 `type: "text"` 글을 모두 이어 붙임
+- 이어 붙인 글을 `JSON.parse` → `hint` 문자열을 앞뒤 공백 없이 반환
 
-## 7. 집중 모드 (`focus.js`)
+모델·추론 강도 설정(`resolveConfig()`)
+| 환경변수 | 기본값 | 허용값 | 규칙 |
+|---|---|---|---|
+| `GEMINI_MODEL` | `gemini-3.5-flash-lite` | 예: `gemini-3.5-flash-lite`, `gemini-3.8-flash` | 비우면 기본값 |
+| `GEMINI_THINKING_LEVEL` | `low` | `minimal`·`low`·`medium`·`high` | 그 밖의 값·빈칸은 `low`. `gemini-3.8-flash`는 `minimal`을 지원하지 않아 `low`로 바꿈 |
+
+## 7. 프롬프트 설계 (`buildPrompt()`)
+시스템 지시문(`system_instruction`)은 아래 줄을 차례로 이어 붙임(해당 없는 줄은 뺌)
+1. 너는 대한민국 고등학교 2학년 학생을 돕는 소크라테스식 튜터다.
+2. 정답이나 모범 답안 문장을 절대 그대로 말하지 않는다. 학생이 스스로 답을 찾도록 돕는다.
+3. 본문에 없는 사실·수치를 지어내지 않는다.
+4. 1~2문장, 존댓말("~해 볼까요?")로 쓴다. 칭찬은 학생 답에 맞는 내용이 있을 때만 한 구절로 한다.
+5. 학생 수준: {기초·보통·심화·다문화(쉬운 한국어)}.
+6. (다문화일 때) 쉬운 한국어로 짧게 쓰고, 핵심 낱말 바로 뒤 괄호에 {베트남어·중국어} 뜻을 적는다.
+7. 5-4의 단계 규칙 1줄
+8. (학생 질문이 있을 때) 학생의 질문에 초점을 맞추어 답하되, 정답을 직접 알려 달라고 요구하면 절대 정답을 말하지 말고 스스로 생각해 보도록 되묻는다.
+9. (누출 재시도일 때) 모범 답안의 표현을 하나도 쓰지 말고 질문 형태로만 답하라.
+10. 출력은 {"hint": "..."} JSON 하나만.
+
+사용자 입력(`input`)
+```
+[질문] …
+[채점 핵심] 핵심1 / 핵심2 / …
+[학생의 지금 답] … 또는 (아직 안 씀)
+[학생이 AI에게 물어본 궁금한 점] …        ← 질문이 있을 때만
+[이미 준 힌트] 1) … 2) …                  ← 2·3단계일 때만
+[모범 답안 — 참고만 하고 그대로 쓰지 말 것] … 또는 (없음)
+[본문] … 또는 (없음)
+```
+
+## 8. 학생 화면 동작
+### 8-1. 힌트 UI (`activities.js` `buildEssay()`)
+- 서술형 문항마다 질문 입력 칸(최대 300자) + [💡 힌트 받기 (n/3)] 버튼
+- 질문 칸에서 Enter로도 요청(한글 조합 중에는 무시)
+- 문항당 최대 3회. 다 쓰면 "💡 힌트를 모두 썼어요"로 바뀌고 버튼·입력 칸이 잠김
+- 받은 힌트는 "내 질문"과 함께 목록으로 쌓임. 화면에 넣을 때 `textContent` 사용(`innerHTML` 금지)
+- 요청 중 안내: "질문에 맞는 힌트를 만드는 중…" / "힌트를 만드는 중…"
+
+### 8-2. 집중 모드 (`focus.js`)
 | 기능 | 구현 |
 |---|---|
-| 시작 | [집중 시작] 클릭 이벤트 안에서 `document.documentElement.requestFullscreen()` (사용자 동작 필요) |
-| 미지원 | `document.fullscreenEnabled`가 false면 전체 화면 없이 진행(아이폰 사파리 등) + "이 기기는 전체 화면을 지원하지 않아요" 안내 |
-| 이탈 감지 | `visibilitychange`(hidden), `window` `blur`, `fullscreenchange`(전체 화면 해제) 중 하나라도 발생하면 이탈 시작. 중복 이벤트는 이미 이탈 중이면 무시 |
-| 복귀 | `visible`·`focus` 시 이탈 종료 → 이탈 시간 누적, 횟수 +1, "자리를 비웠어요(N번째)" 알림(3초 뒤 자동 닫힘) |
-| 타이머 | `setInterval` 횟수가 아니라 **`Date.now()` 시각 차이**로 계산(백그라운드 탭에서 타이머가 느려지는 문제 방지). 집중 시간 = 경과 시간 − 이탈 시간 누적 |
-| 종료 | [제출] 또는 [집중 끝내기] → `document.exitFullscreen()` → 기록 고정 |
-| 저장 | 기록을 `lc:session:{docId}`에 저장해 새로고침 후에도 결과 카드에 반영 |
+| 시작 | [집중 시작] 클릭 안에서 `requestFullscreen()`. 미지원 기기는 전체 화면 없이 진행하고 안내 문구 표시 |
+| 이탈 감지 | 마우스가 창 밖으로 나감(`mouseout`, 언어 선택 목록이 열릴 때는 제외) / 다른 탭·창(`visibilitychange`, `window blur`) / 전체 화면 해제(`fullscreenchange`) |
+| 안내 | "이탈 N번째" 배지와 이유별 안내. 마우스는 돌아오면 자동으로 닫히고, 탭·전체 화면은 버튼으로 복귀 |
+| 우선순위 | 전체 화면 해제 > 탭 이동 > 마우스 |
+| 시간 계산 | `setInterval` 횟수가 아니라 `Date.now()` 시각 차이로 계산. 집중 시간 = 경과 시간 − 이탈 시간 합 |
+| 종료 | [집중 끝내기] → 전체 화면 해제 → "집중 시간 mm:ss · 이탈 N회 — 이 기록은 화면에만 보이고 저장되지 않아요." |
 
-## 8. 프롬프트 설계 (서버 `api/feedback.js` 안의 systemInstruction)
-공통 규칙
-- 출력은 지정 JSON 스키마만. 설명·마크다운 금지
-- 원문에 없는 사실·수치를 지어내지 않음. 고유명사·수치·연도는 원문 그대로
-- 대상: 대한민국 고등학생
-
-수준별 규칙(convert)
-| 수준 | 본문 | 낱말 풀이 | 질문 |
-|---|---|---|---|
-| basic | 쉬운 말, 한 문장 40자 안팎, 핵심 개념만, 일상 비유 1~2개 | 어려운 용어를 일상어로 | 본문에서 바로 찾을 수 있는 내용 |
-| normal | 원문 수준과 범위 유지, 문장만 다듬음 | 교과 용어 | 개념 이해 확인 |
-| advanced | 전문 용어 사용, 원리 설명 + 확장 질문 1개를 본문 끝에 | 용어의 정확한 정의 | 원리 적용·비교 |
-
-multicultural 규칙
-- 기초 자료를 쉬운 한국어(짧은 문장, 한자어 최소화)로 다시 씀
-- 본문 속 핵심 낱말 뒤에 괄호로 모국어 병기: `예측(dự đoán)`
-- glossary의 `native`에 모국어 뜻, 질문·보기는 기초와 같은 뜻 유지(쉬운 한국어)
-
-hint 규칙
-- 정답 문장, 모범 답안, `evidence` 문장을 그대로 쓰지 않음
-- 학생 답에 이미 있는 내용은 칭찬 1구절 후 다음 단계로
-- 1~2문장, 존댓말("~해 볼까요?")
+### 8-3. 읽기 도구 (`reader-tools.js`)
+- 글자 크기: 보통 → 크게 → 아주 크게 순환
+- 읽어 주기: 브라우저 `speechSynthesis`(한국어 `ko-KR`)
+- 다문화 모드: 낱말 풀이 표의 낱말에 밑줄 → 누르면 쉬운 뜻·모국어 뜻 말풍선, 발음 듣기(`vi-VN`·`zh-CN`)
 
 ## 9. 보안·비용 통제
 | 항목 | 방법 |
 |---|---|
-| 키 보관 | Supabase 환경변수(Secrets) `GEMINI_API_KEY`·`SUPABASE_URL`·`SUPABASE_SECRET_KEY`, 로컬은 `.env.local`(`.env.example`을 복사해 작성) |
-| 저장 남용 | 누구나 `POST /api/materials`를 부를 수 있음 → 형식 검증·200KB 상한으로 쓰레기 저장을 줄임. 교사 인증은 5차시 이후 과제(문서화) |
-| 저장소 보호 | `.gitignore`에 `.env*` 포함. 첫 커밋 전에 확인 |
-| 키 노출 점검 | 배포 후 개발자 도구 Sources·Network에서 키 문자열 검색, GitHub 저장소 검색 |
-| 입력 크기 | 원문 6,000자, 학생 답 1,000자, 요청 본문 60KB 초과 시 400 |
-| 호출 횟수 | 힌트: 질문당 3회(브라우저 `localStorage` 기준), 다문화: 언어별 1회 캐시 |
-| 한계(문서화) | 브라우저 기준 제한이라 기록을 지우면 우회 가능. 서버 쪽 제한은 DB가 생기는 5차시 이후 과제. 무료 등급 키 자체의 분당·일일 한도가 최종 안전장치 |
-| 화면 출력 | AI 응답·교사 입력을 화면에 넣을 때 `textContent` 사용(`innerHTML` 금지) — 저장소에서 읽은 자료에 스크립트가 섞여도 실행되지 않게 |
+| 키 보관 | 로컬은 `.env.local`(`.env.example`을 복사해 작성), 배포는 Supabase 환경변수(Secrets). 코드·대화창·저장소에 키를 쓰지 않음 |
+| 저장소 보호 | `.gitignore`에 `.env`, `.env.*` 제외(`.env.example`만 허용). 첫 커밋 전에 확인 |
+| 소스·비밀 파일 열람 차단 | `dev-server.mjs`가 `/.`로 시작하거나 `/.`가 들어 있는 경로, `/api/` 아래 파일을 403으로 막음. 폴더 밖 경로도 403 |
+| 키 노출 점검 | 개발자 도구 Sources·Network에서 키 앞부분 검색, GitHub 저장소 검색 → 0건 |
+| 학생 정보 | 이름·번호 입력 칸 없음. 서버 로그에 본문·답을 남기지 않음. Gemini에도 `store: false` |
+| 입력 크기 | 5-2 표의 글자 수 제한, 로컬 서버 요청 본문 1MB 상한 |
+| 호출 횟수 | 서술형 문항당 힌트 3회(브라우저 기준), 요청 1번에 Gemini 최대 2회 |
+| 알려진 한계 | 정답·모범 답안이 `activities.json`과 힌트 요청에 들어 있어 개발자 도구로 볼 수 있음 → 4차시는 허용, 5차시 "화면에 안 보임 ≠ 접근 불가"(RLS) 수업 사례로 씀. 힌트 횟수 제한도 브라우저 기준이라 새로고침하면 다시 3회가 됨 |
+| 화면 출력 | md는 DOMPurify로 정리한 뒤 넣고, AI 응답은 `textContent`로만 넣음 |
 
-## 10. 로컬 개발과 배포
-1. `.env.example`을 복사해 `.env.local` 만들기 → `GEMINI_API_KEY` 입력(키 값은 대화창·코드에 붙여넣지 않음) → `.gitignore`에 `.env*`가 있는지 확인
-2. Supabase 대시보드 → 프로젝트 → **Storage → New bucket** `materials`(public) 생성 → Project URL·secret key를 `.env.local`의 `SUPABASE_URL`·`SUPABASE_SECRET_KEY`에 입력
-3. `npm install`(`@supabase/supabase-js`) → 로컬 실행 `npm run dev` → `http://127.0.0.1:5173`
-4. Supabase 환경변수(Secrets)에 `GEMINI_API_KEY`·`SUPABASE_URL`·`SUPABASE_SECRET_KEY` 등록(메뉴 이름·이름 규칙은 당일 Supabase 공식 문서 확인)
-5. GitHub 저장소에 push → GitHub 연동 Supabase 자동 반영
-6. 환경변수를 새로 등록·변경했으면 **재배포**(등록만 하면 반영 안 됨, 4차시 최다 오류)
+## 10. 로컬 개발
+1. Node.js 20 이상 확인(외부 npm 패키지 설치 없음)
+2. `.env.example`을 복사해 `.env.local` 만들기 → `GEMINI_API_KEY`에 AI Studio 키 입력. `GEMINI_MODEL`·`GEMINI_THINKING_LEVEL`은 비워 두면 기본값
+3. `npm run dev` → `http://127.0.0.1:5173` (포트·주소는 `PORT`·`HOST` 환경변수로 바꿀 수 있음)
+4. 서버 시작 로그에서 "모델: … | GEMINI_API_KEY: 설정됨" 확인
+- `.env`와 `.env.local`을 모두 읽고, 같은 이름은 `.env.local` 값이 우선함
+- `index.html`을 파일로 직접 열면(`file://`) 자료를 읽지 못함 → 반드시 로컬 서버 주소로 열기
 
-## 11. 테스트 계획
-자동 테스트 도구는 두지 않고(빌드 도구 없음 원칙), 아래 시나리오를 수동으로 확인한다. 각 항목은 PRD 8절 체크리스트와 1:1 대응.
+## 11. 배포 (GitHub → Supabase)
+### 11-1. 순서
+1. 커밋·푸시 전에 `.env.local`이 추적되지 않는지 확인(`git status`)
+2. GitHub 저장소에 push
+3. Supabase 환경변수(Secrets)에 `GEMINI_API_KEY` 등록(필요하면 `GEMINI_MODEL`·`GEMINI_THINKING_LEVEL`도 등록)
+4. 환경변수를 새로 등록·변경했으면 다시 배포(등록만 하면 반영 안 됨)
+5. 배포 주소에서 9절 키 노출 점검
+
+### 11-2. 주의 — 서버 함수 형식
+- 지금 `api/feedback.js`는 Node.js `(req, res)` 형식(`res.status().json()`)이고, 로컬에서는 `dev-server.mjs`가 이 형식을 맞춰 줌
+- Supabase Edge Functions는 Deno 기반(`Deno.serve`, `Request`/`Response`)이라 그대로 올릴 수 없음. 올릴 때는 `buildPrompt()`·`callGemini()`·`leaksAnswer()`는 그대로 두고 요청·응답 처리 부분만 바꿔야 함
+- 정적 화면(`index.html`·`materials/`)을 어디에 올릴지, 함수 경로(`/api/feedback`)를 어떻게 맞출지, Secrets 이름 규칙은 **연수 당일 Supabase 공식 문서로 확인**
+
+## 12. 테스트 계획
+자동 테스트 도구는 두지 않고 아래 시나리오를 직접 확인함. 2026-11-26 로컬에서 1·2·5·9번을 `gemini-3.5-flash-lite` 실제 호출로 확인함
 | # | 시나리오 | 기대 결과 |
 |---|---|---|
-| 1 | 트랜스포머 원문 붙여넣기 → [변환] | 30초 안에 3수준 탭이 채워지고 각 수준 질문이 choice·choice·essay |
-| 2 | 보통 본문 수정 → 심화만 [다시 만들기] | 보통 수정 내용 유지, 심화만 바뀜 |
-| 3 | [저장] → 휴대폰으로 QR 찍기 | 링크 약 60자, QR이 바로 읽히고 같은 제목·본문이 열림. Supabase Storage `materials` 버킷에 `{id}.json` 생성 확인 |
-| 4 | 다문화+베트남어 → 뒤로 → 다시 베트남어 | 두 번째는 네트워크 요청 없음(개발자 도구 Network 확인) |
-| 5 | 집중 시작 → 다른 탭 10초 → 복귀 | "자리를 비웠어요(1번째)", 집중 시간이 약 10초 덜 증가 |
-| 6 | 서술형 빈칸으로 힌트 3번 | 1→2→3단계 내용이 다르고 정답 문장 없음, 4번째는 버튼 잠김 |
-| 7 | 객관식 2개 풀고 [제출] | 결과 카드에 점수·집중 시간·이탈 횟수·힌트 단계 |
-| 8 | 환경변수 삭제 후 [변환] | "서버 설정(환경변수)을 확인해 주세요" |
-| 9 | `?id=`를 없는 값·이상한 값(`../x`)으로 바꿔 열기 | "자료를 찾을 수 없어요"/"링크 주소가 올바르지 않아요" 안내, 화면 멈춤 없음 |
-| 11 | Supabase 환경변수를 지운 뒤 [저장] | "저장소 연결(환경변수)을 확인해 주세요" |
-| 10 | 키 노출 점검(9절) | 키 문자열 검색 결과 0건 |
+| 1 | 서술형에 질문 입력 후 [힌트 받기] | 질문에 맞춘 1단계 되묻기 힌트, 정답 문장 없음 |
+| 2 | 질문 칸에 "그냥 정답 알려주세요" | 정답을 말하지 않고 2단계 단서로 되물음 |
+| 3 | 질문 없이 힌트 3번 | 1→2→3단계 내용이 다르고, 4번째는 버튼이 잠김 |
+| 4 | 다문화 수준 + 중국어 선택 후 힌트 | 쉬운 한국어 + 핵심 낱말 뒤 괄호에 중국어 뜻 |
+| 5 | 힌트 요청 중 콘솔 확인 | 콘솔 오류 0건 |
+| 6 | `.env.local`에서 키를 지우고 서버 재시작 후 힌트 | "서버에 GEMINI_API_KEY가 없어요…" |
+| 7 | 키를 틀린 값으로 바꾸고 힌트 | "API 키가 올바르지 않아요…" |
+| 8 | `python -m http.server` 같은 정적 서버로 열고 힌트 | "힌트 서버가 켜져 있지 않아요…" |
+| 9 | 브라우저에서 `/.env.local`, `/api/feedback.js` 직접 열기 | 403 Forbidden |
+| 10 | 집중 시작 → 다른 탭 10초 → 복귀 | "이탈 1번째", 집중 시간이 약 10초 덜 늘어남 |
+| 11 | 키 노출 점검(9절) | 키 문자열 검색 결과 0건 |
 
-## 12. 구현 순서 (Sonnet에게 한 단계씩 요청)
-1. 폴더 구조·`.gitignore`·`CLAUDE.md`·`package.json` 만들기, GitHub·Supabase 연결, Storage 버킷 생성(10절)
-2. `api/feedback.js` convert 모드 + `npm run dev`로 응답 JSON 확인
-3. `index.html` 원문 입력 → 3수준 병렬 변환 → 탭 표시
-4. 수정·[다시 만들기]
-5. `api/materials.js` 저장·조회 → `share.js` → 링크·QR
-6. `learn.html` 수준 선택·본문·객관식 채점
-7. 집중 모드(`focus.js`)
-8. hint 모드 + 서술형 힌트 3단계
-9. multicultural 모드 + 언어 캐시
-10. 결과 카드 → 11절 테스트 전체 → 배포·키 노출 점검
+## 13. v1 설계와 달라진 점
+| v1 설계(구현 전) | v2 실제 구현 | 이유 |
+|---|---|---|
+| 교사 화면 `index.html`에서 원문 → Gemini로 3수준 변환(`mode: "convert"`) | 교사가 Claude Code 대화로 `materials/*.md`를 만들고 검토 | 자료 생성에는 API가 필요 없음. API는 힌트 1곳만 쓰기로 결정 |
+| 학생 기기에서 다문화 자료를 Gemini로 생성(`mode: "multicultural"`) | 미리 만든 `다문화.md` 사용 | 같은 이유. 교사가 검토한 자료만 학생에게 보여 줌 |
+| `learn.html?id=…` 공유 링크·QR, `api/materials.js` + 저장소(ShareDoc) | 구현하지 않음. 자료는 저장소의 `materials/` 폴더에서 바로 읽음 | 4차시 범위 축소. 자료 저장은 5차시 Supabase에서 다룸 |
+| `generateContent` + `gemini-2.5-flash` + `temperature` | Interactions API + `gemini-3.5-flash-lite`(기본) + `thinking_level` | 최신 API로 전환, 지원 중단 파라미터 제거 |
+| 확인 질문 3개(choice·choice·essay) | 본문 중간 활동 4개 + 형성평가 5개(choice·choice·select·blank·essay) | 수업 활동을 늘림 |
+| 학생 질문 없음 | 서술형 질문 입력(300자) + 정답 요구 시 되묻기 | 학생이 궁금한 점을 직접 묻게 함 |
+| `localStorage`에 힌트·집중 기록 저장 | 저장하지 않음(메모리만) | 학생 기록을 남기지 않는 원칙 |
+| 누출 검사: `evidence` 문장 20자 일치 | 모범 답안 15자 창(3자 간격) 일치, 2회 누출 시 대체 힌트 | 실제 문항 데이터(`model`)에 맞춤 |
 
-## 13. 5차시 확장 지점
+## 14. 5차시 확장 지점
 | 지금(4차시) | 5차시에 바뀌는 것 |
 |---|---|
-| 자료를 Storage 파일(`materials/{id}.json`)로 저장 | Supabase `materials` 테이블로 이전(ID·링크 형식은 그대로) |
-| 결과 카드만 표시 | `answers`(class_code, student_no, level, question_no, answer, created_at) 저장, 학생 번호 입력 추가 |
-| 정답이 조회 응답에 들어 있음 | 정답은 DB에 두고 RLS로 학생 조회 차단 |
-| 누구나 자료 저장 가능 | 교사 구분(학급 코드)·자료 목록 관리 |
-| 힌트 제한이 브라우저 기준 | DB 기준 제한 가능 |
-- **5차시 도입 동기 정리**: Storage는 "파일을 통째로 넣고 꺼내는 상자"라 학생 30명의 답을 행 단위로 모으고, 조건으로 찾고, 접근 권한을 나누기 어렵다 → 표(테이블)와 권한(RLS)이 있는 DB가 필요
-- 이를 위해 `js/share.js`의 `saveDoc()`·`loadDoc()`와 `api/materials.js`의 요청·응답 형식을 지켜, 5차시에는 저장 위치만 Supabase 테이블로 바꾸면 되게 한다.
+| 답·점수·힌트가 화면에만 있음 | `answers`(확인 질문 답)·`questions`(힌트 질문, `hint_step`) 테이블에 저장. 서버 함수 `api/submit.js` |
+| 교사가 결과를 볼 수 없음 | `teacher.html` + `api/results.js`, 교사 코드(`TEACHER_CODE`) 확인 |
+| 정답이 `activities.json`에 들어 있음 | 정답은 DB에 두고 RLS로 브라우저 직접 접근 차단 |
+| 힌트 횟수 제한이 브라우저 기준 | DB 기록 기준으로 제한 가능 |
+| 환경변수 `GEMINI_API_KEY` 1개 | `SUPABASE_URL`·`SUPABASE_SECRET_KEY`·`TEACHER_CODE` 추가 |
+- `api/feedback.js`의 요청 형식(5-2)은 그대로 두고, 5차시에는 힌트 요청 뒤 `questions`에 기록하는 부분만 더함
